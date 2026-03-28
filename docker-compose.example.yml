@@ -39,7 +39,8 @@ services:
     ports:
       - "8200:8000"
     environment:
-      # Django security — generate a random 50-character string
+      # Django security — generate with the command in README.
+      # Use only letters and digits; $ and % characters cause issues in Docker Compose.
       - SECRET_KEY=CHANGE_ME_SECRET_KEY
 
       - DEBUG=False
