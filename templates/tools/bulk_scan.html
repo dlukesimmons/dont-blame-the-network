@@ -1,0 +1,376 @@
+{% extends 'base.html' %}
+
+{% block title %}Bulk ICMP Scan{% endblock %}
+{% block page_title %}Bulk ICMP Scan{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+
+  <!-- Form Card -->
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header py-3 px-4 d-flex align-items-center gap-2">
+        <i class="bi bi-layers text-primary"></i>
+        Bulk Ping Sweep
+      </div>
+      <div class="card-body p-4">
+        <div class="row g-3 align-items-start">
+
+          <div class="col-md-5">
+            <label class="form-label" style="font-size:0.8rem;color:#94a3b8;">Networks (one per line or comma-separated)</label>
+            <textarea
+              id="networksInput"
+              class="form-control"
+              rows="6"
+              placeholder="10.10.83.0/24&#10;10.0.85.0/24&#10;192.168.1.0/24"
+              autocomplete="off"
+              spellcheck="false"
+              style="font-family:monospace;font-size:0.875rem;resize:vertical;"
+            ></textarea>
+            <div id="networksError" class="mt-1" style="font-size:0.75rem;color:#f87171;display:none;"></div>
+            <div class="mt-1" style="font-size:0.72rem;color:#475569;">
+              Maximum 20 networks &middot; Up to /16 per network
+            </div>
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label d-block" style="font-size:0.8rem;color:#94a3b8;">Options</label>
+            <div class="d-flex flex-column gap-2 pt-1">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="chkDNS">
+                <label class="form-check-label" for="chkDNS" style="font-size:0.85rem;cursor:pointer;">
+                  Resolve DNS
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="chkNetBIOS">
+                <label class="form-check-label" for="chkNetBIOS" style="font-size:0.85rem;cursor:pointer;">
+                  Query NetBIOS
+                </label>
+              </div>
+            </div>
+
+            <div class="mt-4">
+              <button id="scanBtn" class="btn btn-primary w-100" onclick="startBulkScan()">
+                <i class="bi bi-play-fill me-1"></i> Start Bulk Scan
+              </button>
+              <button id="cancelBtn" class="btn btn-outline-secondary w-100 mt-2" onclick="cancelScan()" style="display:none;">
+                <i class="bi bi-stop-fill me-1"></i> Cancel
+              </button>
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div id="overallProgress" style="display:none;">
+              <div style="font-size:0.75rem;color:#64748b;text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:0.5rem;">Progress</div>
+              <div class="progress mb-2" style="height:6px;background:#162032;">
+                <div id="progressBar" class="progress-bar bg-primary" style="width:0%;transition:width 0.4s;"></div>
+              </div>
+              <div id="progressLabel" style="font-size:0.8rem;color:#94a3b8;"></div>
+              <div id="progressTimer" style="font-size:0.72rem;color:#475569;margin-top:0.2rem;"></div>
+              <div id="overallSummary" class="mt-3" style="display:none;">
+                <div style="font-size:0.75rem;color:#64748b;text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:0.4rem;">Total</div>
+                <div id="summaryBadges" class="d-flex flex-wrap gap-1"></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results area — one card per network, populated progressively -->
+  <div class="col-12" id="resultsArea"></div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const STREAM_URL = "{% url 'bulk_scan_stream' %}";
+const CSRF_TOKEN = "{{ csrf_token }}";
+
+let scanController = null;   // AbortController
+let timerInterval  = null;
+let scanStart      = null;
+let totalUp        = 0;
+let totalDown      = 0;
+let totalHosts     = 0;
+let networkTimes   = {};     // network -> start timestamp
+
+function startBulkScan() {
+  const networksRaw = document.getElementById('networksInput').value.trim();
+  const resolveDNS  = document.getElementById('chkDNS').checked;
+  const resolveNB   = document.getElementById('chkNetBIOS').checked;
+
+  setNetworksError('');
+  if (!networksRaw) { setNetworksError('Please enter at least one network.'); return; }
+
+  // Reset state
+  totalUp = totalDown = totalHosts = 0;
+  networkTimes = {};
+  document.getElementById('resultsArea').innerHTML = '';
+  document.getElementById('overallProgress').style.display = '';
+  document.getElementById('overallSummary').style.display  = 'none';
+  document.getElementById('progressBar').style.width       = '0%';
+  document.getElementById('progressLabel').textContent     = 'Starting…';
+  document.getElementById('progressTimer').textContent     = '';
+
+  const btn    = document.getElementById('scanBtn');
+  const cancel = document.getElementById('cancelBtn');
+  btn.disabled    = true;
+  btn.innerHTML   = '<span class="spinner-border spinner-border-sm me-1"></span> Scanning…';
+  cancel.style.display = '';
+
+  clearInterval(timerInterval);
+  scanStart     = Date.now();
+  timerInterval = setInterval(() => {
+    const s = Math.floor((Date.now() - scanStart) / 1000);
+    document.getElementById('progressTimer').textContent = `${s}s elapsed`;
+  }, 500);
+
+  scanController = new AbortController();
+
+  fetch(STREAM_URL, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
+    body:    JSON.stringify({ networks: networksRaw, resolve_dns: resolveDNS, resolve_netbios: resolveNB }),
+    signal:  scanController.signal,
+  })
+  .then(response => {
+    // Non-2xx means a JSON error response (validation failure)
+    if (!response.ok) {
+      return response.json().then(data => { throw new Error(data.error || 'Request failed.'); });
+    }
+    return readStream(response.body.getReader(), resolveDNS, resolveNB);
+  })
+  .catch(err => {
+    if (err.name === 'AbortError') return;  // User cancelled
+    finishScan();
+    setNetworksError('Error: ' + err.message);
+  });
+}
+
+async function readStream(reader, showDNS, showNB) {
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE events are separated by double newlines
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop();
+
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data: ')) continue;
+        let evt;
+        try { evt = JSON.parse(line.slice(6)); } catch { continue; }
+        handleEvent(evt, showDNS, showNB);
+      }
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      setNetworksError('Stream error: ' + err.message);
+    }
+  }
+  finishScan();
+}
+
+function handleEvent(evt, showDNS, showNB) {
+  if (evt.type === 'start') {
+    networkTimes[evt.network] = Date.now();
+    setProgress(evt.network, evt.index, evt.total, false);
+    createNetworkCard(evt.network, evt.index);
+  }
+  else if (evt.type === 'result') {
+    const elapsed = ((Date.now() - (networkTimes[evt.network] || scanStart)) / 1000).toFixed(1);
+    setProgress(evt.network, evt.index, evt.total, true);
+    populateNetworkCard(evt, showDNS, showNB, elapsed);
+    totalUp    += evt.up_count    || 0;
+    totalDown  += (evt.total_count - evt.up_count) || 0;
+    totalHosts += evt.total_count || 0;
+    updateSummary(evt.index + 1, evt.total);
+  }
+  else if (evt.type === 'done') {
+    document.getElementById('progressBar').style.width = '100%';
+    document.getElementById('progressLabel').textContent = 'All networks scanned.';
+    document.getElementById('overallSummary').style.display = '';
+    updateSummary(null, null);
+  }
+}
+
+function setProgress(network, index, total, completed) {
+  const pct   = Math.round(((index + (completed ? 1 : 0.5)) / total) * 100);
+  document.getElementById('progressBar').style.width = pct + '%';
+  if (completed) {
+    document.getElementById('progressLabel').textContent =
+      `Completed ${index + 1} of ${total}: ${network}`;
+  } else {
+    document.getElementById('progressLabel').textContent =
+      `Scanning ${index + 1} of ${total}: ${network}`;
+  }
+}
+
+function createNetworkCard(network, index) {
+  const area = document.getElementById('resultsArea');
+  const card = document.createElement('div');
+  card.className = 'card mb-3';
+  card.id        = 'net-card-' + index;
+  card.innerHTML = `
+    <div class="card-header py-3 px-4 d-flex align-items-center justify-content-between">
+      <div class="d-flex align-items-center gap-2">
+        <div class="spinner-border spinner-border-sm text-primary" style="width:0.85rem;height:0.85rem;" id="net-spinner-${index}"></div>
+        <span style="font-family:monospace;font-size:0.9rem;">${escHtml(network)}</span>
+      </div>
+      <div id="net-badges-${index}"></div>
+    </div>
+    <div class="card-body p-0" id="net-body-${index}">
+      <div class="text-center py-4" style="color:#475569;font-size:0.85rem;">Scanning…</div>
+    </div>`;
+  area.appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function populateNetworkCard(evt, showDNS, showNB, elapsed) {
+  const idx     = evt.index;
+  const spinner = document.getElementById('net-spinner-' + idx);
+  const badges  = document.getElementById('net-badges-'  + idx);
+  const body    = document.getElementById('net-body-'    + idx);
+
+  if (spinner) spinner.outerHTML =
+    `<i class="bi bi-check-circle-fill text-success" style="font-size:0.9rem;"></i>`;
+
+  if (evt.error) {
+    badges.innerHTML = `<span class="badge bg-danger">Error</span>`;
+    body.innerHTML   = `<div class="p-3"><div class="alert alert-danger mb-0" style="font-size:0.85rem;">${escHtml(evt.error)}</div></div>`;
+    return;
+  }
+
+  const upCount   = evt.up_count;
+  const downCount = evt.total_count - upCount;
+  badges.innerHTML = `
+    <span class="badge bg-success">${upCount} up</span>
+    <span class="badge bg-secondary">${downCount} down</span>
+    <span class="badge" style="background:#1e3a5f;color:#93c5fd;">${evt.total_count} total</span>
+    <span class="badge bg-dark text-secondary ms-1">${elapsed}s</span>`;
+
+  const hosts = [...(evt.hosts || [])].sort((a, b) =>
+    a.status === b.status ? 0 : a.status === 'up' ? -1 : 1
+  );
+
+  if (!hosts.length) {
+    body.innerHTML = `<div class="text-center py-4" style="color:#475569;font-size:0.85rem;">No hosts found.</div>`;
+    return;
+  }
+
+  // Build table; collapse if more than 30 rows to keep page manageable
+  const collapseId = 'collapse-net-' + idx;
+  const doCollapse = hosts.length > 30;
+
+  let header = `<tr>
+    <th class="ps-4" style="width:140px;">IP Address</th>
+    <th style="width:90px;">Status</th>`;
+  if (showDNS) header += `<th>DNS Hostname</th>`;
+  if (showNB)  header += `<th>NetBIOS Name</th>`;
+  header += `</tr>`;
+
+  const rows = hosts.map(h => {
+    const isUp  = h.status === 'up';
+    const badge = isUp
+      ? `<span class="badge bg-success"><i class="bi bi-circle-fill me-1" style="font-size:0.5rem;"></i>Up</span>`
+      : `<span class="badge bg-secondary"><i class="bi bi-circle me-1" style="font-size:0.5rem;"></i>Down</span>`;
+
+    let row = `<tr style="${isUp ? '' : 'opacity:0.45;'}">
+      <td class="ps-4" style="font-family:monospace;font-size:0.875rem;color:#f1f5f9;">${escHtml(h.ip)}</td>
+      <td>${badge}</td>`;
+    if (showDNS) {
+      row += `<td style="font-size:0.82rem;color:${h.dns_name ? '#93c5fd' : '#475569'};">${h.dns_name ? escHtml(h.dns_name) : '<span style="font-style:italic;">—</span>'}</td>`;
+    }
+    if (showNB) {
+      if (h.netbios_name) {
+        const rdnsBadge = h.netbios_source === 'rdns'
+          ? `<span class="badge ms-1" style="font-size:0.6rem;background:#1e3a5f;color:#93c5fd;vertical-align:middle;">rDNS</span>`
+          : '';
+        row += `<td style="font-size:0.82rem;color:#86efac;">${escHtml(h.netbios_name)}${rdnsBadge}</td>`;
+      } else {
+        row += `<td style="font-size:0.82rem;color:#475569;"><span style="font-style:italic;">—</span></td>`;
+      }
+    }
+    row += `</tr>`;
+    return row;
+  }).join('');
+
+  const tableHtml = `
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead id="thead-${idx}">${header}</thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+
+  if (doCollapse) {
+    body.innerHTML = `
+      <div class="px-4 py-2" style="border-bottom:1px solid #293548;">
+        <button class="btn btn-sm btn-outline-secondary" type="button"
+          data-bs-toggle="collapse" data-bs-target="#${collapseId}">
+          <i class="bi bi-chevron-down me-1"></i>Show ${hosts.length} hosts
+        </button>
+      </div>
+      <div class="collapse" id="${collapseId}">${tableHtml}</div>`;
+  } else {
+    body.innerHTML = tableHtml;
+  }
+}
+
+function updateSummary(completed, total) {
+  const el = document.getElementById('summaryBadges');
+  let html = `<span class="badge bg-success">${totalUp} up</span>
+    <span class="badge bg-secondary">${totalDown} down</span>
+    <span class="badge" style="background:#1e3a5f;color:#93c5fd;">${totalHosts} total</span>`;
+  if (completed !== null && total !== null) {
+    html += ` <span class="badge bg-dark text-secondary">${completed}/${total} networks done</span>`;
+  }
+  el.innerHTML = html;
+}
+
+function finishScan() {
+  clearInterval(timerInterval);
+  const btn    = document.getElementById('scanBtn');
+  const cancel = document.getElementById('cancelBtn');
+  btn.disabled    = false;
+  btn.innerHTML   = '<i class="bi bi-play-fill me-1"></i> Start Bulk Scan';
+  cancel.style.display = 'none';
+  scanController  = null;
+}
+
+function cancelScan() {
+  if (scanController) {
+    scanController.abort();
+    document.getElementById('progressLabel').textContent = 'Cancelled.';
+  }
+  finishScan();
+}
+
+function setNetworksError(msg) {
+  const el = document.getElementById('networksError');
+  el.textContent   = msg;
+  el.style.display = msg ? '' : 'none';
+  document.getElementById('networksInput').style.borderColor = msg ? '#f87171' : '';
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+</script>
+{% endblock %}

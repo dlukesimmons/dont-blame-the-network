@@ -1,0 +1,10 @@
+<div class="col-md-6 col-lg-4">
+  <div style="font-size:0.7rem;color:#475569;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.2rem;">{{ label }}</div>
+  {% if status %}
+    {% include 'inventory/_status_badge.html' with status=status %}
+  {% elif value %}
+    <div style="font-size:0.875rem;{% if mono %}font-family:monospace;color:#93c5fd;{% else %}color:#e2e8f0;{% endif %}">{{ value }}</div>
+  {% else %}
+    <div style="font-size:0.875rem;color:#334155;">—</div>
+  {% endif %}
+</div>

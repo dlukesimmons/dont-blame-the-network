@@ -1,0 +1,11 @@
+{% if status == 'active' %}
+  <span class="badge bg-success">Active</span>
+{% elif status == 'inactive' %}
+  <span class="badge bg-secondary">Inactive</span>
+{% elif status == 'decommissioned' %}
+  <span class="badge bg-danger">Decommissioned</span>
+{% elif status == 'in_stock' %}
+  <span class="badge" style="background:#1e3a5f;color:#93c5fd;">In Stock</span>
+{% else %}
+  <span class="badge bg-secondary">{{ status }}</span>
+{% endif %}

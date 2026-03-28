@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+{% block title %}Servers{% endblock %}
+{% block page_title %}Servers{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'server_add' %}" class="btn btn-primary btn-sm">
+  <i class="bi bi-plus-lg me-1"></i> Add Server
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header py-3 px-4 d-flex align-items-center justify-content-between">
+    <div class="d-flex align-items-center gap-2">
+      <i class="bi bi-server text-primary"></i>
+      Servers
+      <span class="badge" style="background:#1e3a5f;color:#93c5fd;">{{ servers.count }}</span>
+    </div>
+    <form method="get" class="d-flex gap-2">
+      <input name="q" value="{{ q }}" type="text" class="form-control form-control-sm" placeholder="Search name or IP…" style="width:240px;">
+      <button class="btn btn-sm btn-outline-secondary">Search</button>
+      {% if q %}<a href="?" class="btn btn-sm btn-outline-secondary">Clear</a>{% endif %}
+    </form>
+  </div>
+  <div class="card-body p-0">
+    {% if servers %}
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th class="ps-4">Name</th>
+            <th>Type</th>
+            <th>OS</th>
+            <th>Primary IP</th>
+            <th>Status</th>
+            <th>Location</th>
+            <th>Auth Profiles</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in servers %}
+          <tr style="{% if s.status == 'decommissioned' %}opacity:0.4;{% elif s.status == 'inactive' %}opacity:0.65;{% endif %}">
+            <td class="ps-4">
+              <a href="{% url 'server_detail' s.pk %}" style="font-weight:600;color:#f1f5f9;text-decoration:none;">{{ s.name }}</a>
+              {% if s.model %}<div style="font-size:0.72rem;color:#475569;">{{ s.manufacturer }} {{ s.model }}</div>{% endif %}
+            </td>
+            <td style="font-size:0.82rem;color:#94a3b8;">{{ s.get_server_type_display|default:"—" }}</td>
+            <td style="font-size:0.82rem;color:#94a3b8;">
+              {{ s.get_os_type_display|default:"—" }}{% if s.os_version %} {{ s.os_version }}{% endif %}
+            </td>
+            <td style="font-family:monospace;font-size:0.875rem;color:#93c5fd;">{{ s.primary_ip|default:"—" }}</td>
+            <td>{% include 'inventory/_status_badge.html' with status=s.status %}</td>
+            <td style="font-size:0.82rem;color:#64748b;">{{ s.location|default:"—" }}</td>
+            <td>
+              {% for p in s.ssh_profiles.all %}<span class="badge me-1" style="background:#14532d;color:#86efac;">SSH: {{ p.name }}</span>{% endfor %}
+              {% for p in s.https_profiles.all %}<span class="badge me-1" style="background:#3b0764;color:#e9d5ff;">HTTPS: {{ p.name }}</span>{% endfor %}
+            </td>
+            <td class="text-end pe-4">
+              <a href="{% url 'server_edit' s.pk %}" class="btn btn-sm btn-outline-secondary me-1"><i class="bi bi-pencil"></i></a>
+              <button type="button" class="btn btn-sm btn-outline-danger"
+                onclick="confirmDelete('{% url 'server_delete' s.pk %}', '{{ s.name|escapejs }}')">
+                <i class="bi bi-trash"></i>
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center py-5" style="color:#475569;">
+      {% if q %}No servers match "{{ q }}".{% else %}No servers yet. <a href="{% url 'server_add' %}">Add one.</a>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="modal fade" id="deleteModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="background:#1e293b;border:1px solid #293548;">
+      <div class="modal-header" style="border-color:#293548;">
+        <h5 class="modal-title" style="font-size:0.95rem;">Confirm Delete</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="font-size:0.875rem;color:#94a3b8;">
+        Delete server <strong id="deleteName" style="color:#f1f5f9;"></strong>?
+        <div class="mt-1" style="font-size:0.78rem;color:#f87171;">This cannot be undone.</div>
+      </div>
+      <div class="modal-footer" style="border-color:#293548;">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <form id="deleteForm" method="post">{% csrf_token %}
+          <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function confirmDelete(url, name) {
+  document.getElementById('deleteForm').action = url;
+  document.getElementById('deleteName').textContent = name;
+  new bootstrap.Modal(document.getElementById('deleteModal')).show();
+}
+</script>
+{% endblock %}

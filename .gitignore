@@ -1,0 +1,13 @@
+# Runtime data
+data/
+staticfiles/
+
+# Python
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Secrets
+.env
+.env.*

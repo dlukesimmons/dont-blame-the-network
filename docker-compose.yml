@@ -1,0 +1,46 @@
+services:
+
+  db:
+    image: mysql:8.0
+    container_name: dbtn-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: dbtn-password
+      MYSQL_DATABASE:      dbtn
+      MYSQL_USER:          dbtn
+      MYSQL_PASSWORD:      dbtn-password
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "dbtn", "-pdbtn-password"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  dbtn:
+    build: .
+    container_name: dbtn
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8200:8000"
+    environment:
+      - SECRET_KEY=change-me-to-a-long-random-string-in-production
+      - DEBUG=False
+      - ALLOWED_HOSTS=*
+      - DJANGO_SUPERUSER_USERNAME=admin
+      - DJANGO_SUPERUSER_PASSWORD=admin
+      - DJANGO_SUPERUSER_EMAIL=admin@local.lan
+      - FIELD_ENCRYPTION_KEY=2X5vQMbu2p9noHdQ7IBl3F2nIxkQHBdx5vo2RlmbcwM=
+      - DB_HOST=db
+      - DB_NAME=dbtn
+      - DB_USER=dbtn
+      - DB_PASSWORD=dbtn-password
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    volumes:
+      - ./staticfiles:/app/staticfiles

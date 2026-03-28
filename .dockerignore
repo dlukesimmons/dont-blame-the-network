@@ -1,0 +1,25 @@
+# Runtime data — never bake into the image
+data/
+staticfiles/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Git
+.git/
+.gitignore
+
+# GitHub Actions (not needed inside container)
+.github/
+
+# Docs / examples
+*.md
+docker-compose.example.yml
+
+# Secrets / local overrides
+.env
+.env.*

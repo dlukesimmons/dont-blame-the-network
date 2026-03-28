@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+
+{% if user.is_admin %}
+<!-- Admin Stats Row -->
+<div class="row g-3 mb-4">
+    <div class="col-sm-4">
+        <div class="stat-card">
+            <div class="d-flex align-items-center justify-content-between">
+                <div>
+                    <div class="stat-value">{{ user_count }}</div>
+                    <div class="stat-label">Total Users</div>
+                </div>
+                <i class="bi bi-people-fill" style="font-size:2rem;color:#3b82f6;opacity:0.5;"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-4">
+        <div class="stat-card">
+            <div class="d-flex align-items-center justify-content-between">
+                <div>
+                    <div class="stat-value" style="color:#22c55e;">{{ active_count }}</div>
+                    <div class="stat-label">Active Users</div>
+                </div>
+                <i class="bi bi-person-check-fill" style="font-size:2rem;color:#22c55e;opacity:0.5;"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-4">
+        <div class="stat-card">
+            <div class="d-flex align-items-center justify-content-between">
+                <div>
+                    <div class="stat-value" style="color:#a78bfa;">{{ admin_count }}</div>
+                    <div class="stat-label">Admin Users</div>
+                </div>
+                <i class="bi bi-shield-fill" style="font-size:2rem;color:#a78bfa;opacity:0.5;"></i>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Welcome Card -->
+<div class="card mb-4">
+    <div class="card-body p-4">
+        <div class="d-flex align-items-center gap-3">
+            <div style="width:48px;height:48px;border-radius:50%;background:#1d4ed8;display:flex;align-items:center;justify-content:center;font-size:1.25rem;font-weight:700;color:#fff;flex-shrink:0;">
+                {{ user.username|first|upper }}
+            </div>
+            <div>
+                <h2 style="font-size:1.1rem;font-weight:700;color:#f1f5f9;margin:0;">
+                    Welcome back, {{ user.display_name }}
+                </h2>
+                <p style="font-size:0.8rem;color:#64748b;margin:0;">
+                    Signed in as <strong style="color:#94a3b8;">{{ user.username }}</strong>
+                    &nbsp;&middot;&nbsp;
+                    <span class="badge badge-role-{% if user.is_superuser %}super{% elif user.is_staff %}admin{% else %}user{% endif %}">
+                        {{ user.role_label }}
+                    </span>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tools Section -->
+<div class="card">
+    <div class="card-header d-flex align-items-center gap-2 py-3 px-4">
+        <i class="bi bi-tools text-primary"></i>
+        Network Tools
+    </div>
+    <div class="card-body p-4">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <a href="{% url 'icmp_scan' %}" class="text-decoration-none">
+                    <div class="p-3 rounded d-flex align-items-center gap-3" style="background:#162032;border:1px solid #293548;transition:border-color 0.15s;" onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='#293548'">
+                        <div style="width:42px;height:42px;border-radius:8px;background:#1e3a5f;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                            <i class="bi bi-radar" style="font-size:1.2rem;color:#3b82f6;"></i>
+                        </div>
+                        <div>
+                            <div style="font-weight:600;font-size:0.875rem;color:#f1f5f9;">ICMP Scan</div>
+                            <div style="font-size:0.72rem;color:#64748b;">Ping sweep with DNS &amp; NetBIOS</div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-md-4">
+                <a href="{% url 'bulk_scan' %}" class="text-decoration-none">
+                    <div class="p-3 rounded d-flex align-items-center gap-3" style="background:#162032;border:1px solid #293548;transition:border-color 0.15s;" onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='#293548'">
+                        <div style="width:42px;height:42px;border-radius:8px;background:#1e3a5f;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                            <i class="bi bi-layers" style="font-size:1.2rem;color:#3b82f6;"></i>
+                        </div>
+                        <div>
+                            <div style="font-weight:600;font-size:0.875rem;color:#f1f5f9;">Bulk ICMP Scan</div>
+                            <div style="font-size:0.72rem;color:#64748b;">Scan multiple networks at once</div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

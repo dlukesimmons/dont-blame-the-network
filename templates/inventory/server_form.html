@@ -1,0 +1,138 @@
+{% extends 'base.html' %}
+{% block title %}{{ title }}{% endblock %}
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.profile-checkbox-list { list-style:none; padding:0; margin:0; }
+.profile-checkbox-list li { margin-bottom:0.35rem; }
+.profile-checkbox-list label { font-size:0.85rem; cursor:pointer; color:#94a3b8; }
+.profile-checkbox-list input[type=checkbox] { margin-right:0.4rem; }
+.profile-section { background:#162032; border:1px solid #293548; border-radius:0.375rem; padding:0.75rem 1rem; min-height:60px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+<div class="col-xl-10">
+
+<form method="post">
+{% csrf_token %}
+
+<div class="card mb-3">
+  <div class="card-header py-3 px-4 d-flex align-items-center gap-2">
+    <i class="bi bi-server text-primary"></i> {{ title }}
+  </div>
+  <div class="card-body p-4">
+    {% if form.non_field_errors %}<div class="alert alert-danger mb-3">{{ form.non_field_errors }}</div>{% endif %}
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-4">
+        <label class="form-label form-label-sm">Server Name <span class="text-danger">*</span></label>
+        {{ form.name }}
+        {% if form.name.errors %}<div class="mt-1" style="font-size:0.75rem;color:#f87171;">{{ form.name.errors.0 }}</div>{% endif %}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label form-label-sm">Server Type</label>
+        {{ form.server_type }}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label form-label-sm">Status</label>
+        {{ form.status }}
+      </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-3">
+        <label class="form-label form-label-sm">Primary IP</label>
+        {{ form.primary_ip }}
+        {% if form.primary_ip.errors %}<div class="mt-1" style="font-size:0.75rem;color:#f87171;">{{ form.primary_ip.errors.0 }}</div>{% endif %}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label form-label-sm">Management IP</label>
+        {{ form.management_ip }}
+        {% if form.management_ip.errors %}<div class="mt-1" style="font-size:0.75rem;color:#f87171;">{{ form.management_ip.errors.0 }}</div>{% endif %}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label form-label-sm">Location</label>
+        {{ form.location }}
+      </div>
+    </div>
+
+    <div style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#475569;margin-bottom:0.5rem;margin-top:1rem;">Operating System</div>
+    <div class="row g-3 mb-3">
+      <div class="col-md-3">
+        <label class="form-label form-label-sm">OS Type</label>
+        {{ form.os_type }}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label form-label-sm">OS Version</label>
+        {{ form.os_version }}
+      </div>
+    </div>
+
+    <div style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#475569;margin-bottom:0.5rem;margin-top:1rem;">Hardware</div>
+    <div class="row g-3 mb-3">
+      <div class="col-md-3">
+        <label class="form-label form-label-sm">Manufacturer</label>
+        {{ form.manufacturer }}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label form-label-sm">Model</label>
+        {{ form.model }}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label form-label-sm">Serial Number</label>
+        {{ form.serial_number }}
+      </div>
+    </div>
+
+    <div>
+      <label class="form-label form-label-sm">Description / Notes</label>
+      {{ form.description }}
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-header py-3 px-4" style="font-size:0.875rem;">
+    <i class="bi bi-key text-primary me-1"></i> Authentication Profiles
+  </div>
+  <div class="card-body p-4">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="mb-1" style="font-size:0.75rem;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">SSH</div>
+        <div class="profile-section">
+          {% if form.ssh_profiles %}
+            {{ form.ssh_profiles }}
+          {% else %}
+            <span style="font-size:0.8rem;color:#475569;">No SSH profiles — <a href="{% url 'ssh_add' %}">add one</a></span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="mb-1" style="font-size:0.75rem;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">HTTPS</div>
+        <div class="profile-section">
+          {% if form.https_profiles %}
+            {{ form.https_profiles }}
+          {% else %}
+            <span style="font-size:0.8rem;color:#475569;">No HTTPS profiles — <a href="{% url 'https_add' %}">add one</a></span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="d-flex gap-2">
+  <button type="submit" class="btn btn-primary">{{ action }}</button>
+  <a href="{% url 'server_list' %}" class="btn btn-outline-secondary">Cancel</a>
+  {% if server %}
+  <a href="{% url 'server_detail' server.pk %}" class="btn btn-outline-secondary ms-auto">View Detail</a>
+  {% endif %}
+</div>
+</form>
+
+</div>
+</div>
+{% endblock %}

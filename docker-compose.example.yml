@@ -1,0 +1,65 @@
+# Don't Blame The Network — deployment compose file
+# Pull the pre-built image; no source code required.
+#
+# BEFORE RUNNING:
+#   1. Copy this file to docker-compose.yml
+#   2. Replace every value marked CHANGE_ME
+#   3. Generate a Fernet key for FIELD_ENCRYPTION_KEY:
+#        python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#      Keep this key safe — losing it means losing access to stored credentials.
+#   4. docker compose up -d
+
+services:
+
+  db:
+    image: mysql:8.0
+    container_name: dbtn-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: CHANGE_ME_ROOT_PASSWORD
+      MYSQL_DATABASE:      dbtn
+      MYSQL_USER:          dbtn
+      MYSQL_PASSWORD:      CHANGE_ME_DB_PASSWORD
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u dbtn -p$$MYSQL_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  dbtn:
+    image: ghcr.io/dlukesimmons/dont-blame-the-network:latest
+    container_name: dbtn
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8200:8000"
+    environment:
+      # Django security — generate a random 50-character string
+      - SECRET_KEY=CHANGE_ME_SECRET_KEY
+
+      - DEBUG=False
+      - ALLOWED_HOSTS=*
+
+      # Admin account created on first run
+      - DJANGO_SUPERUSER_USERNAME=admin
+      - DJANGO_SUPERUSER_PASSWORD=CHANGE_ME_ADMIN_PASSWORD
+      - DJANGO_SUPERUSER_EMAIL=admin@local.lan
+
+      # Fernet encryption key for stored credentials (KEEP A BACKUP)
+      - FIELD_ENCRYPTION_KEY=CHANGE_ME_FERNET_KEY
+
+      # Database — must match the db service above
+      - DB_HOST=db
+      - DB_NAME=dbtn
+      - DB_USER=dbtn
+      - DB_PASSWORD=CHANGE_ME_DB_PASSWORD
+    cap_add:
+      - NET_RAW    # required for ICMP ping sweep (nmap)
+      - NET_ADMIN
+    volumes:
+      - ./staticfiles:/app/staticfiles
