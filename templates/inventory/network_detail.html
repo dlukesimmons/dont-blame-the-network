@@ -55,12 +55,25 @@
       </div>
       <div class="card-body p-3">
         {% with snmp=device.snmp_profiles.all ssh=device.ssh_profiles.all https=device.https_profiles.all %}
+
         {% if snmp %}
         <div class="mb-2" style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#475569;">SNMP</div>
         {% for p in snmp %}
-        <div class="d-flex align-items-center justify-content-between mb-1">
-          <span style="font-size:0.82rem;color:#93c5fd;">{{ p.name }}</span>
-          <span class="badge" style="background:#1e3a5f;color:#93c5fd;">{{ p.version }}</span>
+        <div class="mb-2">
+          <div class="d-flex align-items-center justify-content-between">
+            <span style="font-size:0.82rem;color:#93c5fd;">{{ p.name }}</span>
+            <div class="d-flex align-items-center gap-1">
+              <span class="badge" style="background:#1e3a5f;color:#93c5fd;">{{ p.version }}</span>
+              <button class="btn btn-sm test-btn"
+                style="padding:0.1rem 0.45rem;font-size:0.72rem;border:1px solid #1e3a5f;color:#93c5fd;background:transparent;"
+                data-url="{% url 'test_snmp' device.pk p.pk %}"
+                data-result="snmp-result-{{ p.pk }}"
+                onclick="runTest(this)">
+                <i class="bi bi-play-fill"></i> Test
+              </button>
+            </div>
+          </div>
+          <div id="snmp-result-{{ p.pk }}" class="mt-1 test-result"></div>
         </div>
         {% endfor %}
         {% endif %}
@@ -68,9 +81,21 @@
         {% if ssh %}
         <div class="mb-2 {% if snmp %}mt-3{% endif %}" style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#475569;">SSH</div>
         {% for p in ssh %}
-        <div class="d-flex align-items-center justify-content-between mb-1">
-          <span style="font-size:0.82rem;color:#86efac;">{{ p.name }}</span>
-          <span style="font-size:0.75rem;color:#64748b;">{{ p.username }}:{{ p.port }}</span>
+        <div class="mb-2">
+          <div class="d-flex align-items-center justify-content-between">
+            <span style="font-size:0.82rem;color:#86efac;">{{ p.name }}</span>
+            <div class="d-flex align-items-center gap-1">
+              <span style="font-size:0.72rem;color:#64748b;">{{ p.username }}:{{ p.port }}</span>
+              <button class="btn btn-sm test-btn"
+                style="padding:0.1rem 0.45rem;font-size:0.72rem;border:1px solid #14532d;color:#86efac;background:transparent;"
+                data-url="{% url 'test_ssh' device.pk p.pk %}"
+                data-result="ssh-result-{{ p.pk }}"
+                onclick="runTest(this)">
+                <i class="bi bi-play-fill"></i> Test
+              </button>
+            </div>
+          </div>
+          <div id="ssh-result-{{ p.pk }}" class="mt-1 test-result"></div>
         </div>
         {% endfor %}
         {% endif %}
@@ -119,6 +144,54 @@
 
 {% block extra_scripts %}
 <script>
+const CSRF = '{{ csrf_token }}';
+
+async function runTest(btn) {
+  const url       = btn.dataset.url;
+  const resultId  = btn.dataset.result;
+  const resultEl  = document.getElementById(resultId);
+
+  btn.disabled    = true;
+  btn.innerHTML   = '<span class="spinner-border spinner-border-sm" style="width:.7rem;height:.7rem;"></span>';
+  resultEl.innerHTML = '';
+
+  try {
+    const resp = await fetch(url, {
+      method:  'POST',
+      headers: { 'X-CSRFToken': CSRF },
+    });
+    const data = await resp.json();
+    renderResult(resultEl, data);
+  } catch (e) {
+    resultEl.innerHTML = resultBadge(false, 'Request failed: ' + e.message);
+  } finally {
+    btn.disabled  = false;
+    btn.innerHTML = '<i class="bi bi-play-fill"></i> Test';
+  }
+}
+
+function renderResult(el, data) {
+  if (data.success) {
+    let detail = '';
+    if (data.sys_name) detail += `<span style="color:#86efac;">${esc(data.sys_name)}</span>`;
+    if (data.sys_desc) detail += `<div style="font-size:0.7rem;color:#475569;margin-top:0.15rem;word-break:break-word;">${esc(data.sys_desc.substring(0, 120))}${data.sys_desc.length > 120 ? '…' : ''}</div>`;
+    if (data.banner)   detail += `<span style="font-size:0.72rem;color:#64748b;">${esc(data.banner)}</span>`;
+    el.innerHTML = resultBadge(true, '') + (detail ? `<div class="mt-1">${detail}</div>` : '');
+  } else {
+    el.innerHTML = resultBadge(false, data.error || 'Unknown error');
+  }
+}
+
+function resultBadge(ok, msg) {
+  if (ok) return `<span class="badge bg-success" style="font-size:0.68rem;">&#10003; Connected</span>`;
+  return `<span class="badge bg-danger" style="font-size:0.68rem;">&#10007; Failed</span>
+          <span style="font-size:0.72rem;color:#f87171;margin-left:0.3rem;">${esc(msg)}</span>`;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 function confirmDelete(url, name) {
   document.getElementById('deleteForm').action = url;
   document.getElementById('deleteName').textContent = name;

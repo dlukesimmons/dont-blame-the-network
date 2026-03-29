@@ -9,6 +9,10 @@ urlpatterns = [
     path('network/<int:pk>/edit/',      views.network_edit,   name='network_edit'),
     path('network/<int:pk>/delete/',    views.network_delete, name='network_delete'),
 
+    # Connectivity tests
+    path('network/<int:device_pk>/test-snmp/<int:profile_pk>/', views.test_snmp, name='test_snmp'),
+    path('network/<int:device_pk>/test-ssh/<int:profile_pk>/',  views.test_ssh,  name='test_ssh'),
+
     # Servers
     path('servers/',                    views.server_list,    name='server_list'),
     path('servers/add/',                views.server_add,     name='server_add'),
