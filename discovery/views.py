@@ -188,14 +188,26 @@ def _parse_cisco_mac_table(text):
     return entries
 
 
+def _enrich_arp_with_vlan(arp_entries, mac_entries):
+    """
+    Join ARP entries with MAC table entries on MAC address to add VLAN.
+    Adds 'vlan' and 'vlan_mac' (e.g. '10.0050.7966.6800') to each ARP row.
+    """
+    mac_to_vlan = {e['mac']: e['vlan'] for e in mac_entries}
+    for entry in arp_entries:
+        vlan = mac_to_vlan.get(entry['mac'], '')
+        entry['vlan']     = vlan
+        entry['vlan_mac'] = f"{vlan}.{entry['mac']}" if vlan else entry['mac']
+    return arp_entries
+
+
 def _parse_result(result):
     """Parse a DeviceDiscoveryResult's outputs into structured tables."""
     if result.status != DeviceDiscoveryResult.STATUS_SUCCESS:
         return [], []
-    return (
-        _parse_cisco_arp(result.arp_output),
-        _parse_cisco_mac_table(result.mac_output),
-    )
+    arp = _parse_cisco_arp(result.arp_output)
+    mac = _parse_cisco_mac_table(result.mac_output)
+    return _enrich_arp_with_vlan(arp, mac), mac
 
 
 # ── SSE streaming worker ────────────────────────────────────────────────────
@@ -314,10 +326,14 @@ def _build_comparison(snap_a, snap_b):
         rb = rb_map.get(dev_id)
         device = (ra or rb).device
 
-        arp_a = _parse_cisco_arp(ra.arp_output) if ra and ra.status == 'success' else []
-        arp_b = _parse_cisco_arp(rb.arp_output) if rb and rb.status == 'success' else []
         mac_a = _parse_cisco_mac_table(ra.mac_output) if ra and ra.status == 'success' else []
         mac_b = _parse_cisco_mac_table(rb.mac_output) if rb and rb.status == 'success' else []
+        arp_a = _enrich_arp_with_vlan(
+            _parse_cisco_arp(ra.arp_output) if ra and ra.status == 'success' else [], mac_a
+        )
+        arp_b = _enrich_arp_with_vlan(
+            _parse_cisco_arp(rb.arp_output) if rb and rb.status == 'success' else [], mac_b
+        )
 
         marp_a = {e['mac']: e for e in arp_a}
         marp_b = {e['mac']: e for e in arp_b}

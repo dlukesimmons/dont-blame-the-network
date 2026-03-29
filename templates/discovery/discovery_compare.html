@@ -149,70 +149,71 @@
     <div id="cmp-{{ forloop.counter }}"
          class="accordion-collapse collapse {% if dev.new_count > 0 or dev.removed_count > 0 %}show{% endif %}">
         <div class="accordion-body p-0">
-            <div class="row g-0">
 
-                <!-- ARP diff -->
-                <div class="col-lg-6" style="border-right:1px solid #293548;">
-                    <div class="px-3 pt-3 pb-3">
-                        <div class="section-label">ARP Table</div>
-                        {% if dev.arp_diff %}
-                        <table class="table diff-table mb-0">
-                            <thead><tr><th>IP</th><th>MAC</th><th>Interface</th><th></th></tr></thead>
-                            <tbody>
-                                {% for e in dev.arp_diff %}
-                                <tr class="{% if e.state == 'added' %}row-added{% elif e.state == 'removed' %}row-removed{% endif %}">
-                                    <td>{{ e.ip }}</td>
-                                    <td class="font-monospace">{{ e.mac }}</td>
-                                    <td class="text-secondary">{{ e.interface }}</td>
-                                    <td>
-                                        {% if e.state == 'added' %}
-                                        <i class="bi bi-plus-circle-fill text-success" title="New in B"></i>
-                                        {% elif e.state == 'removed' %}
-                                        <i class="bi bi-dash-circle-fill text-danger" title="Removed from A"></i>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                        {% else %}
-                        <div class="small text-secondary px-1">No ARP data for this device.</div>
-                        {% endif %}
-                    </div>
+                <!-- ARP diff (full width) -->
+                <div class="px-3 pt-3 pb-2" style="border-bottom:1px solid #293548;">
+                    <div class="section-label">ARP Table</div>
+                    {% if dev.arp_diff %}
+                    <table class="table diff-table mb-0">
+                        <thead>
+                            <tr><th>IP</th><th>MAC</th><th>VLAN</th><th>VLAN.MAC</th><th>Interface</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            {% for e in dev.arp_diff %}
+                            <tr class="{% if e.state == 'added' %}row-added{% elif e.state == 'removed' %}row-removed{% endif %}">
+                                <td>{{ e.ip }}</td>
+                                <td class="font-monospace">{{ e.mac }}</td>
+                                <td>{{ e.vlan|default:"—" }}</td>
+                                <td class="font-monospace text-info">{{ e.vlan_mac }}</td>
+                                <td class="text-secondary">{{ e.interface }}</td>
+                                <td>
+                                    {% if e.state == 'added' %}
+                                    <i class="bi bi-plus-circle-fill text-success" title="New in B"></i>
+                                    {% elif e.state == 'removed' %}
+                                    <i class="bi bi-dash-circle-fill text-danger" title="Removed from A"></i>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <div class="small text-secondary px-1 pb-2">No ARP data for this device.</div>
+                    {% endif %}
                 </div>
 
-                <!-- MAC diff -->
-                <div class="col-lg-6">
-                    <div class="px-3 pt-3 pb-3">
-                        <div class="section-label">MAC Address Table</div>
-                        {% if dev.mac_diff %}
-                        <table class="table diff-table mb-0">
-                            <thead><tr><th>VLAN</th><th>MAC</th><th>Type</th><th>Port</th><th></th></tr></thead>
-                            <tbody>
-                                {% for e in dev.mac_diff %}
-                                <tr class="{% if e.state == 'added' %}row-added{% elif e.state == 'removed' %}row-removed{% endif %}">
-                                    <td>{{ e.vlan }}</td>
-                                    <td class="font-monospace">{{ e.mac }}</td>
-                                    <td class="text-secondary">{{ e.type }}</td>
-                                    <td class="text-secondary">{{ e.port }}</td>
-                                    <td>
-                                        {% if e.state == 'added' %}
-                                        <i class="bi bi-plus-circle-fill text-success" title="New in B"></i>
-                                        {% elif e.state == 'removed' %}
-                                        <i class="bi bi-dash-circle-fill text-danger" title="Removed from A"></i>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                        {% else %}
-                        <div class="small text-secondary px-1">No MAC data for this device.</div>
-                        {% endif %}
-                    </div>
+                <!-- MAC diff (full width) -->
+                <div class="px-3 pt-3 pb-3">
+                    <div class="section-label">MAC Address Table</div>
+                    {% if dev.mac_diff %}
+                    <table class="table diff-table mb-0">
+                        <thead>
+                            <tr><th>VLAN</th><th>MAC</th><th>VLAN.MAC</th><th>Type</th><th>Port</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            {% for e in dev.mac_diff %}
+                            <tr class="{% if e.state == 'added' %}row-added{% elif e.state == 'removed' %}row-removed{% endif %}">
+                                <td>{{ e.vlan }}</td>
+                                <td class="font-monospace">{{ e.mac }}</td>
+                                <td class="font-monospace text-info">{{ e.vlan }}.{{ e.mac }}</td>
+                                <td class="text-secondary">{{ e.type }}</td>
+                                <td class="text-secondary">{{ e.port }}</td>
+                                <td>
+                                    {% if e.state == 'added' %}
+                                    <i class="bi bi-plus-circle-fill text-success" title="New in B"></i>
+                                    {% elif e.state == 'removed' %}
+                                    <i class="bi bi-dash-circle-fill text-danger" title="Removed from A"></i>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <div class="small text-secondary px-1">No MAC data for this device.</div>
+                    {% endif %}
                 </div>
 
-            </div>
         </div>
     </div>
 </div>

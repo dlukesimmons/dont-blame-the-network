@@ -112,85 +112,86 @@ pre.raw-output {
     {% if r.status == 'success' %}
     <div id="collapse-{{ r.pk }}" class="accordion-collapse collapse {% if r.status == 'success' %}show{% endif %}">
         <div class="accordion-body p-0">
-            <div class="row g-0">
 
-                <!-- ARP Table -->
-                <div class="col-lg-6" style="border-right:1px solid #293548;">
-                    <div class="px-3 pt-3 pb-1">
-                        <div class="small fw-semibold text-secondary mb-2">
-                            <i class="bi bi-table me-1"></i>ARP Table
-                            <span class="badge bg-secondary ms-1" style="font-size:.65rem;">{{ item.arp_entries|length }}</span>
-                        </div>
-                        {% if item.arp_entries %}
-                        <div class="table-responsive">
-                            <table class="table output-table mb-0">
-                                <thead>
-                                    <tr>
-                                        <th>IP Address</th>
-                                        <th>MAC Address</th>
-                                        <th>Interface</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for e in item.arp_entries %}
-                                    <tr>
-                                        <td>{{ e.ip }}</td>
-                                        <td class="font-monospace">{{ e.mac }}</td>
-                                        <td class="text-secondary">{{ e.interface }}</td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                        {% else %}
-                        <details>
-                            <summary class="small text-secondary" style="cursor:pointer;">Show raw output</summary>
-                            <pre class="raw-output mt-2">{{ r.arp_output|default:"(empty)" }}</pre>
-                        </details>
-                        {% endif %}
+                <!-- ARP Table (full width) -->
+                <div class="px-3 pt-3 pb-2" style="border-bottom:1px solid #293548;">
+                    <div class="small fw-semibold text-secondary mb-2">
+                        <i class="bi bi-table me-1"></i>ARP Table
+                        <span class="badge bg-secondary ms-1" style="font-size:.65rem;">{{ item.arp_entries|length }}</span>
                     </div>
+                    {% if item.arp_entries %}
+                    <div class="table-responsive">
+                        <table class="table output-table mb-0">
+                            <thead>
+                                <tr>
+                                    <th>IP Address</th>
+                                    <th>MAC Address</th>
+                                    <th>VLAN</th>
+                                    <th>VLAN.MAC</th>
+                                    <th>Interface</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for e in item.arp_entries %}
+                                <tr>
+                                    <td>{{ e.ip }}</td>
+                                    <td class="font-monospace">{{ e.mac }}</td>
+                                    <td>{{ e.vlan|default:"—" }}</td>
+                                    <td class="font-monospace text-info">{{ e.vlan_mac }}</td>
+                                    <td class="text-secondary">{{ e.interface }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <details>
+                        <summary class="small text-secondary" style="cursor:pointer;">Show raw output</summary>
+                        <pre class="raw-output mt-2">{{ r.arp_output|default:"(empty)" }}</pre>
+                    </details>
+                    {% endif %}
                 </div>
 
-                <!-- MAC Table -->
-                <div class="col-lg-6">
-                    <div class="px-3 pt-3 pb-1">
-                        <div class="small fw-semibold text-secondary mb-2">
-                            <i class="bi bi-grid-3x3-gap me-1"></i>MAC Address Table
-                            <span class="badge bg-secondary ms-1" style="font-size:.65rem;">{{ item.mac_entries|length }}</span>
-                        </div>
-                        {% if item.mac_entries %}
-                        <div class="table-responsive">
-                            <table class="table output-table mb-0">
-                                <thead>
-                                    <tr>
-                                        <th>VLAN</th>
-                                        <th>MAC Address</th>
-                                        <th>Type</th>
-                                        <th>Port</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for e in item.mac_entries %}
-                                    <tr>
-                                        <td>{{ e.vlan }}</td>
-                                        <td class="font-monospace">{{ e.mac }}</td>
-                                        <td class="text-secondary">{{ e.type }}</td>
-                                        <td class="text-secondary">{{ e.port }}</td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                        {% else %}
-                        <details>
-                            <summary class="small text-secondary" style="cursor:pointer;">Show raw output</summary>
-                            <pre class="raw-output mt-2">{{ r.mac_output|default:"(empty)" }}</pre>
-                        </details>
-                        {% endif %}
+                <!-- MAC Address Table (full width) -->
+                <div class="px-3 pt-3 pb-2">
+                    <div class="small fw-semibold text-secondary mb-2">
+                        <i class="bi bi-grid-3x3-gap me-1"></i>MAC Address Table
+                        <span class="badge bg-secondary ms-1" style="font-size:.65rem;">{{ item.mac_entries|length }}</span>
                     </div>
+                    {% if item.mac_entries %}
+                    <div class="table-responsive">
+                        <table class="table output-table mb-0">
+                            <thead>
+                                <tr>
+                                    <th>VLAN</th>
+                                    <th>MAC Address</th>
+                                    <th>VLAN.MAC</th>
+                                    <th>Type</th>
+                                    <th>Port</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for e in item.mac_entries %}
+                                <tr>
+                                    <td>{{ e.vlan }}</td>
+                                    <td class="font-monospace">{{ e.mac }}</td>
+                                    <td class="font-monospace text-info">{{ e.vlan }}.{{ e.mac }}</td>
+                                    <td class="text-secondary">{{ e.type }}</td>
+                                    <td class="text-secondary">{{ e.port }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <details>
+                        <summary class="small text-secondary" style="cursor:pointer;">Show raw output</summary>
+                        <pre class="raw-output mt-2">{{ r.mac_output|default:"(empty)" }}</pre>
+                    </details>
+                    {% endif %}
                 </div>
 
-            </div>
+            <div>
 
             <!-- Raw output toggle -->
             <div class="px-3 pb-3 pt-1">
