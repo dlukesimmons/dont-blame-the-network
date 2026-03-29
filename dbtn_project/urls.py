@@ -15,5 +15,6 @@ urlpatterns = [
     path('tools/',           include('tools.urls')),
     path('inventory/',       include('inventory.urls')),
     path('credentials/',     include('credentials.urls')),
+    path('discovery/',       include('discovery.urls')),
     path('',                 root_redirect, name='root'),
 ]

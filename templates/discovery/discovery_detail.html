@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block title %}{{ snapshot.name }}{% endblock %}
+{% block page_title %}{{ snapshot.name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.output-table { font-size:.8rem; font-family: 'Consolas','Courier New',monospace; }
+.output-table td, .output-table th { padding:.3rem .6rem; }
+pre.raw-output {
+    background:#0d1929; border:1px solid #293548; border-radius:.375rem;
+    font-size:.75rem; color:#94a3b8; padding:.75rem; max-height:300px;
+    overflow-y:auto; white-space:pre; margin:0;
+}
+</style>
+{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'discovery_list' %}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left"></i> All Snapshots
+</a>
+<a href="{% url 'discovery_compare' %}?a={{ snapshot.pk }}" class="btn btn-sm btn-outline-info">
+    <i class="bi bi-intersect"></i> Compare…
+</a>
+{% endblock %}
+
+{% block content %}
+
+<!-- Summary stats -->
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md-3 col-lg-2">
+        <div class="stat-card text-center">
+            <div class="stat-value">{{ snapshot.device_count }}</div>
+            <div class="stat-label">Total</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-lg-2">
+        <div class="stat-card text-center" style="border-color:#166534;">
+            <div class="stat-value text-success">{{ counts.success }}</div>
+            <div class="stat-label">Success</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-lg-2">
+        <div class="stat-card text-center" style="border-color:#7f1d1d;">
+            <div class="stat-value text-danger">{{ counts.failed }}</div>
+            <div class="stat-label">Failed</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-lg-2">
+        <div class="stat-card text-center">
+            <div class="stat-value text-secondary">{{ counts.no_ssh }}</div>
+            <div class="stat-label">No SSH</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-lg-2">
+        <div class="stat-card text-center">
+            <div class="stat-value text-secondary">{{ counts.no_ip }}</div>
+            <div class="stat-label">No IP</div>
+        </div>
+    </div>
+    <div class="col-12 col-md-3 col-lg-2">
+        <div class="stat-card text-center">
+            <div class="small text-secondary">{{ snapshot.site|default:"All Sites" }}</div>
+            <div class="small text-secondary mt-1">{{ snapshot.created_at|date:"M d, Y H:i" }}</div>
+            {% if snapshot.created_by %}<div class="small text-secondary">{{ snapshot.created_by.username }}</div>{% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Per-device accordion -->
+<div class="accordion" id="devAccordion">
+{% for item in parsed %}
+{% with r=item.result d=item.result.device %}
+<div class="accordion-item" style="background:#1e293b;border:1px solid #293548;margin-bottom:.5rem;border-radius:.5rem;overflow:hidden;">
+    <h2 class="accordion-header">
+        <button class="accordion-button {% if r.status != 'success' %}collapsed{% endif %}"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#collapse-{{ r.pk }}"
+                style="background:#162032;color:#e2e8f0;border-bottom:1px solid #293548;">
+            <div class="d-flex align-items-center gap-3 w-100">
+                <!-- Status icon -->
+                <span>
+                    {% if r.status == 'success' %}<i class="bi bi-check-circle-fill text-success"></i>
+                    {% elif r.status == 'failed' %}<i class="bi bi-x-circle-fill text-danger"></i>
+                    {% else %}<i class="bi bi-dash-circle text-secondary"></i>{% endif %}
+                </span>
+                <!-- Name + IP -->
+                <span class="fw-semibold">{{ d.name }}</span>
+                <span class="text-secondary small">{{ d.management_ip|default:d.primary_ip|default:"" }}</span>
+                {% if d.manufacturer %}<span class="text-secondary small">· {{ d.manufacturer }}</span>{% endif %}
+                <!-- Counts -->
+                <span class="ms-auto me-3 d-flex gap-2" style="font-size:.8rem;">
+                    {% if r.status == 'success' %}
+                    <span class="text-secondary">
+                        <i class="bi bi-table me-1"></i>{{ item.arp_entries|length }} ARP
+                    </span>
+                    <span class="text-secondary">
+                        <i class="bi bi-grid-3x3-gap me-1"></i>{{ item.mac_entries|length }} MACs
+                    </span>
+                    {% elif r.status == 'failed' %}
+                    <span class="text-danger small" title="{{ r.error }}">{{ r.error|truncatechars:60 }}</span>
+                    {% elif r.status == 'no_ssh' %}
+                    <span class="text-secondary small">No SSH profile assigned</span>
+                    {% elif r.status == 'no_ip' %}
+                    <span class="text-secondary small">No IP address</span>
+                    {% endif %}
+                </span>
+            </div>
+        </button>
+    </h2>
+
+    {% if r.status == 'success' %}
+    <div id="collapse-{{ r.pk }}" class="accordion-collapse collapse {% if r.status == 'success' %}show{% endif %}">
+        <div class="accordion-body p-0">
+            <div class="row g-0">
+
+                <!-- ARP Table -->
+                <div class="col-lg-6" style="border-right:1px solid #293548;">
+                    <div class="px-3 pt-3 pb-1">
+                        <div class="small fw-semibold text-secondary mb-2">
+                            <i class="bi bi-table me-1"></i>ARP Table
+                            <span class="badge bg-secondary ms-1" style="font-size:.65rem;">{{ item.arp_entries|length }}</span>
+                        </div>
+                        {% if item.arp_entries %}
+                        <div class="table-responsive">
+                            <table class="table output-table mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>IP Address</th>
+                                        <th>MAC Address</th>
+                                        <th>Interface</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for e in item.arp_entries %}
+                                    <tr>
+                                        <td>{{ e.ip }}</td>
+                                        <td class="font-monospace">{{ e.mac }}</td>
+                                        <td class="text-secondary">{{ e.interface }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <details>
+                            <summary class="small text-secondary" style="cursor:pointer;">Show raw output</summary>
+                            <pre class="raw-output mt-2">{{ r.arp_output|default:"(empty)" }}</pre>
+                        </details>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- MAC Table -->
+                <div class="col-lg-6">
+                    <div class="px-3 pt-3 pb-1">
+                        <div class="small fw-semibold text-secondary mb-2">
+                            <i class="bi bi-grid-3x3-gap me-1"></i>MAC Address Table
+                            <span class="badge bg-secondary ms-1" style="font-size:.65rem;">{{ item.mac_entries|length }}</span>
+                        </div>
+                        {% if item.mac_entries %}
+                        <div class="table-responsive">
+                            <table class="table output-table mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>VLAN</th>
+                                        <th>MAC Address</th>
+                                        <th>Type</th>
+                                        <th>Port</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for e in item.mac_entries %}
+                                    <tr>
+                                        <td>{{ e.vlan }}</td>
+                                        <td class="font-monospace">{{ e.mac }}</td>
+                                        <td class="text-secondary">{{ e.type }}</td>
+                                        <td class="text-secondary">{{ e.port }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <details>
+                            <summary class="small text-secondary" style="cursor:pointer;">Show raw output</summary>
+                            <pre class="raw-output mt-2">{{ r.mac_output|default:"(empty)" }}</pre>
+                        </details>
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Raw output toggle -->
+            <div class="px-3 pb-3 pt-1">
+                <details>
+                    <summary class="small text-secondary" style="cursor:pointer;">
+                        <i class="bi bi-terminal me-1"></i>Show raw SSH output
+                    </summary>
+                    <div class="row g-2 mt-1">
+                        <div class="col-lg-6">
+                            <div class="small text-secondary mb-1">show ip arp</div>
+                            <pre class="raw-output">{{ r.arp_output|default:"(empty)" }}</pre>
+                        </div>
+                        <div class="col-lg-6">
+                            <div class="small text-secondary mb-1">show mac address-table</div>
+                            <pre class="raw-output">{{ r.mac_output|default:"(empty)" }}</pre>
+                        </div>
+                    </div>
+                </details>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endwith %}
+{% endfor %}
+</div>
+
+{% endblock %}

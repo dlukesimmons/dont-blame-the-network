@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}New Discovery{% endblock %}
+{% block page_title %}New Discovery{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'discovery_list' %}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left"></i> Back
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+<div class="col-lg-7">
+
+<div class="card">
+    <div class="card-header"><i class="bi bi-binoculars me-2"></i>Configure Discovery</div>
+    <div class="card-body">
+        <form method="post" id="discoveryForm">
+            {% csrf_token %}
+
+            <div class="mb-3">
+                <label class="form-label">Snapshot Name <span class="text-secondary small">(optional)</span></label>
+                <input type="text" name="name" class="form-control"
+                       placeholder="e.g. Pre-maintenance — Core switches">
+                <div class="form-text text-secondary">Leave blank to auto-generate based on site and date.</div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Site</label>
+                <select name="site" class="form-select" id="siteSelect">
+                    <option value="" data-count="{{ all_count }}">All Sites ({{ all_count }} devices)</option>
+                    {% for s in site_data %}
+                    <option value="{{ s.location }}" data-count="{{ s.n }}">
+                        {{ s.location }} ({{ s.n }} device{{ s.n|pluralize }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Device preview -->
+            <div class="p-3 rounded mb-4" style="background:#162032;border:1px solid #293548;">
+                <div class="small text-secondary mb-1">Devices that will be polled</div>
+                <div class="d-flex align-items-center gap-3">
+                    <span class="fw-bold fs-4 text-white" id="deviceCount">{{ all_count }}</span>
+                    <span class="text-secondary small">network device{{ all_count|pluralize }}</span>
+                </div>
+                <div class="small text-secondary mt-2">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Only devices with an SSH profile assigned will be polled. Others will be marked
+                    <span class="badge bg-secondary" style="font-size:.65rem;">No SSH Profile</span>.
+                </div>
+            </div>
+
+            <!-- Commands reference -->
+            <div class="mb-4">
+                <div class="small text-secondary mb-2">Commands run per manufacturer</div>
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0" style="font-size:.8rem;">
+                        <thead>
+                            <tr>
+                                <th>Manufacturer</th>
+                                <th>ARP Command</th>
+                                <th>MAC Table Command</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Cisco <span class="text-secondary">(default)</span></td><td><code>show ip arp</code></td><td><code>show mac address-table</code></td></tr>
+                            <tr><td>Juniper</td><td><code>show arp</code></td><td><code>show ethernet-switching table</code></td></tr>
+                            <tr><td>Aruba / HP</td><td><code>show arp</code></td><td><code>show mac-address-table</code></td></tr>
+                            <tr><td>Extreme</td><td><code>show arp</code></td><td><code>show fdb</code></td></tr>
+                            <tr><td>Fortinet</td><td><code>get system arp</code></td><td><code>diagnose netlink brctl...</code></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="form-text text-secondary">
+                    Manufacturer is matched from the device's Manufacturer field (case-insensitive). Unrecognised manufacturers use Cisco commands.
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-play-circle"></i> Start Discovery
+                </button>
+                <a href="{% url 'discovery_list' %}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+</div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.getElementById('siteSelect').addEventListener('change', function() {
+    const opt = this.options[this.selectedIndex];
+    const n   = opt.dataset.count || '0';
+    document.getElementById('deviceCount').textContent = n;
+});
+</script>
+{% endblock %}

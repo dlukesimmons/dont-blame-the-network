@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% block title %}Compare Snapshots{% endblock %}
+{% block page_title %}Before / After Comparison{% endblock %}
+
+{% block extra_head %}
+<style>
+.diff-table { font-size:.8rem; font-family:'Consolas','Courier New',monospace; }
+.diff-table td, .diff-table th { padding:.3rem .6rem; }
+.row-added   { background: rgba(22,101,52,.35) !important; }
+.row-removed { background: rgba(127,29,29,.35) !important; }
+.row-same    { }
+.diff-badge-add { background:#166534; }
+.diff-badge-rem { background:#7f1d1d; }
+.section-label {
+    font-size:.65rem; font-weight:600; letter-spacing:.08em;
+    text-transform:uppercase; color:#475569; padding:.5rem .75rem .2rem;
+}
+</style>
+{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'discovery_list' %}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left"></i> All Snapshots
+</a>
+{% endblock %}
+
+{% block content %}
+
+<!-- Snapshot selector -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label small text-secondary mb-1">
+                    <span class="badge" style="background:#7f1d1d;">A</span> Before
+                </label>
+                <select name="a" class="form-select form-select-sm" style="min-width:280px;" required>
+                    <option value="">— select snapshot —</option>
+                    {% for s in complete %}
+                    <option value="{{ s.pk }}" {% if snap_a_id == s.pk|stringformat:"s" %}selected{% endif %}>
+                        {{ s.name }} — {{ s.created_at|date:"M d, Y H:i" }}
+                        {% if s.site %}({{ s.site }}){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto d-flex align-items-end pb-1">
+                <i class="bi bi-arrow-right text-secondary fs-5"></i>
+            </div>
+            <div class="col-auto">
+                <label class="form-label small text-secondary mb-1">
+                    <span class="badge bg-success">B</span> After
+                </label>
+                <select name="b" class="form-select form-select-sm" style="min-width:280px;" required>
+                    <option value="">— select snapshot —</option>
+                    {% for s in complete %}
+                    <option value="{{ s.pk }}" {% if snap_b_id == s.pk|stringformat:"s" %}selected{% endif %}>
+                        {{ s.name }} — {{ s.created_at|date:"M d, Y H:i" }}
+                        {% if s.site %}({{ s.site }}){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="bi bi-intersect"></i> Compare
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if comparison %}
+{% with c=comparison %}
+
+<!-- Summary banner -->
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card" style="border-color:#166534;">
+            <div class="card-body d-flex align-items-center gap-3">
+                <i class="bi bi-plus-circle-fill text-success fs-3"></i>
+                <div>
+                    <div class="fw-bold fs-4 text-success">{{ c.total_new }}</div>
+                    <div class="small text-secondary">New entries (ARP + MAC)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card" style="border-color:#7f1d1d;">
+            <div class="card-body d-flex align-items-center gap-3">
+                <i class="bi bi-dash-circle-fill text-danger fs-3"></i>
+                <div>
+                    <div class="fw-bold fs-4 text-danger">{{ c.total_removed }}</div>
+                    <div class="small text-secondary">Removed entries (ARP + MAC)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Legend -->
+<div class="d-flex gap-3 mb-3 small">
+    <span><span class="badge diff-badge-add">&nbsp;&nbsp;</span> Added in B</span>
+    <span><span class="badge diff-badge-rem">&nbsp;&nbsp;</span> Removed from A</span>
+    <span><span class="badge bg-secondary">&nbsp;&nbsp;</span> Unchanged</span>
+</div>
+
+<!-- Per-device comparison -->
+<div class="accordion" id="compareAccordion">
+{% for dev in c.devices %}
+<div class="accordion-item mb-2" style="background:#1e293b;border:1px solid #293548;border-radius:.5rem;overflow:hidden;">
+    <h2 class="accordion-header">
+        <button class="accordion-button {% if dev.new_count == 0 and dev.removed_count == 0 %}collapsed{% endif %}"
+                type="button" data-bs-toggle="collapse"
+                data-bs-target="#cmp-{{ forloop.counter }}"
+                style="background:#162032;color:#e2e8f0;border-bottom:1px solid #293548;">
+            <div class="d-flex align-items-center gap-3 w-100">
+                <span class="fw-semibold">{{ dev.device.name }}</span>
+                <span class="text-secondary small">
+                    {{ dev.device.management_ip|default:dev.device.primary_ip|default:"" }}
+                </span>
+                {% if dev.device.manufacturer %}
+                <span class="text-secondary small">· {{ dev.device.manufacturer }}</span>
+                {% endif %}
+
+                <!-- Only in A / B indicators -->
+                {% if dev.only_in_a %}
+                <span class="badge diff-badge-rem ms-2">Only in A (removed?)</span>
+                {% elif dev.only_in_b %}
+                <span class="badge diff-badge-add ms-2">Only in B (new?)</span>
+                {% endif %}
+
+                <span class="ms-auto me-3 d-flex gap-2" style="font-size:.8rem;">
+                    {% if dev.new_count > 0 %}
+                    <span class="text-success"><i class="bi bi-plus"></i>{{ dev.new_count }} new</span>
+                    {% endif %}
+                    {% if dev.removed_count > 0 %}
+                    <span class="text-danger"><i class="bi bi-dash"></i>{{ dev.removed_count }} removed</span>
+                    {% endif %}
+                    {% if dev.new_count == 0 and dev.removed_count == 0 %}
+                    <span class="text-secondary">No changes</span>
+                    {% endif %}
+                </span>
+            </div>
+        </button>
+    </h2>
+
+    <div id="cmp-{{ forloop.counter }}"
+         class="accordion-collapse collapse {% if dev.new_count > 0 or dev.removed_count > 0 %}show{% endif %}">
+        <div class="accordion-body p-0">
+            <div class="row g-0">
+
+                <!-- ARP diff -->
+                <div class="col-lg-6" style="border-right:1px solid #293548;">
+                    <div class="px-3 pt-3 pb-3">
+                        <div class="section-label">ARP Table</div>
+                        {% if dev.arp_diff %}
+                        <table class="table diff-table mb-0">
+                            <thead><tr><th>IP</th><th>MAC</th><th>Interface</th><th></th></tr></thead>
+                            <tbody>
+                                {% for e in dev.arp_diff %}
+                                <tr class="{% if e.state == 'added' %}row-added{% elif e.state == 'removed' %}row-removed{% endif %}">
+                                    <td>{{ e.ip }}</td>
+                                    <td class="font-monospace">{{ e.mac }}</td>
+                                    <td class="text-secondary">{{ e.interface }}</td>
+                                    <td>
+                                        {% if e.state == 'added' %}
+                                        <i class="bi bi-plus-circle-fill text-success" title="New in B"></i>
+                                        {% elif e.state == 'removed' %}
+                                        <i class="bi bi-dash-circle-fill text-danger" title="Removed from A"></i>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% else %}
+                        <div class="small text-secondary px-1">No ARP data for this device.</div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- MAC diff -->
+                <div class="col-lg-6">
+                    <div class="px-3 pt-3 pb-3">
+                        <div class="section-label">MAC Address Table</div>
+                        {% if dev.mac_diff %}
+                        <table class="table diff-table mb-0">
+                            <thead><tr><th>VLAN</th><th>MAC</th><th>Type</th><th>Port</th><th></th></tr></thead>
+                            <tbody>
+                                {% for e in dev.mac_diff %}
+                                <tr class="{% if e.state == 'added' %}row-added{% elif e.state == 'removed' %}row-removed{% endif %}">
+                                    <td>{{ e.vlan }}</td>
+                                    <td class="font-monospace">{{ e.mac }}</td>
+                                    <td class="text-secondary">{{ e.type }}</td>
+                                    <td class="text-secondary">{{ e.port }}</td>
+                                    <td>
+                                        {% if e.state == 'added' %}
+                                        <i class="bi bi-plus-circle-fill text-success" title="New in B"></i>
+                                        {% elif e.state == 'removed' %}
+                                        <i class="bi bi-dash-circle-fill text-danger" title="Removed from A"></i>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% else %}
+                        <div class="small text-secondary px-1">No MAC data for this device.</div>
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+</div>
+
+{% endwith %}
+{% elif snap_a_id or snap_b_id %}
+<div class="alert alert-warning">Please select two different snapshots to compare.</div>
+{% else %}
+<div class="card text-center py-5">
+    <div class="card-body">
+        <i class="bi bi-intersect" style="font-size:3rem;color:#334155;"></i>
+        <h5 class="mt-3 text-secondary">Select two snapshots above to compare</h5>
+        <p class="text-secondary small">
+            Choose a <strong>Before</strong> and <strong>After</strong> snapshot to see new and removed
+            ARP/MAC entries across all polled devices.
+        </p>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -19,6 +19,7 @@ INSTALLED_APPS = [
     'tools',
     'credentials',
     'inventory',
+    'discovery',
 ]
 
 MIDDLEWARE = [
