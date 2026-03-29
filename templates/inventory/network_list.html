@@ -3,13 +3,19 @@
 {% block page_title %}Network Devices{% endblock %}
 
 {% block topbar_actions %}
+<button type="button" class="btn btn-outline-secondary btn-sm me-1" onclick="openImport()">
+  <i class="bi bi-upload me-1"></i> Import CSV
+</button>
+<a href="{% url 'network_import_template' %}" class="btn btn-outline-secondary btn-sm me-1">
+  <i class="bi bi-download me-1"></i> Download Template
+</a>
 <a href="{% url 'network_add' %}" class="btn btn-primary btn-sm">
   <i class="bi bi-plus-lg me-1"></i> Add Device
 </a>
 {% endblock %}
 
 {% block content %}
-<div class="card">
+<div class="card" id="mainCard">
   <div class="card-header py-3 px-4 d-flex align-items-center justify-content-between">
     <div class="d-flex align-items-center gap-2">
       <i class="bi bi-router text-primary"></i>
@@ -17,18 +23,24 @@
       <span class="badge" style="background:#1e3a5f;color:#93c5fd;">{{ devices.count }}</span>
     </div>
     <form method="get" class="d-flex gap-2">
-      <input name="q" value="{{ q }}" type="text" class="form-control form-control-sm" placeholder="Search name or IP…" style="width:240px;">
+      <input name="q" value="{{ q }}" type="text" class="form-control form-control-sm"
+             placeholder="Search name or IP…" style="width:240px;">
       <button class="btn btn-sm btn-outline-secondary">Search</button>
       {% if q %}<a href="?" class="btn btn-sm btn-outline-secondary">Clear</a>{% endif %}
     </form>
   </div>
+
   <div class="card-body p-0">
     {% if devices %}
     <div class="table-responsive">
       <table class="table table-hover mb-0">
         <thead>
           <tr>
-            <th class="ps-4">Name</th>
+            <th class="ps-3" style="width:36px;">
+              <input type="checkbox" id="selectAll" class="form-check-input"
+                     onchange="toggleSelectAll(this)" title="Select all">
+            </th>
+            <th>Name</th>
             <th>Type</th>
             <th>Primary IP</th>
             <th>Status</th>
@@ -39,8 +51,13 @@
         </thead>
         <tbody>
           {% for d in devices %}
-          <tr style="{% if d.status == 'decommissioned' %}opacity:0.4;{% elif d.status == 'inactive' %}opacity:0.65;{% endif %}">
-            <td class="ps-4">
+          <tr class="device-row" data-id="{{ d.pk }}"
+              style="{% if d.status == 'decommissioned' %}opacity:0.4;{% elif d.status == 'inactive' %}opacity:0.65;{% endif %}">
+            <td class="ps-3">
+              <input type="checkbox" class="form-check-input device-cb" value="{{ d.pk }}"
+                     onchange="onCheckChange()">
+            </td>
+            <td>
               <a href="{% url 'network_detail' d.pk %}" style="font-weight:600;color:#f1f5f9;text-decoration:none;">{{ d.name }}</a>
               {% if d.model %}<div style="font-size:0.72rem;color:#475569;">{{ d.manufacturer }} {{ d.model }}</div>{% endif %}
             </td>
@@ -50,8 +67,8 @@
             <td style="font-size:0.82rem;color:#64748b;">{{ d.location|default:"—" }}</td>
             <td>
               {% for p in d.snmp_profiles.all %}<span class="badge me-1" style="background:#172554;color:#93c5fd;">SNMP: {{ p.name }}</span>{% endfor %}
-              {% for p in d.ssh_profiles.all %}<span class="badge me-1" style="background:#14532d;color:#86efac;">SSH: {{ p.name }}</span>{% endfor %}
-              {% for p in d.https_profiles.all %}<span class="badge me-1" style="background:#3b0764;color:#e9d5ff;">HTTPS: {{ p.name }}</span>{% endfor %}
+              {% for p in d.ssh_profiles.all  %}<span class="badge me-1" style="background:#14532d;color:#86efac;">SSH: {{ p.name }}</span>{% endfor %}
+              {% for p in d.https_profiles.all%}<span class="badge me-1" style="background:#3b0764;color:#e9d5ff;">HTTPS: {{ p.name }}</span>{% endfor %}
             </td>
             <td class="text-end pe-4">
               <a href="{% url 'network_edit' d.pk %}" class="btn btn-sm btn-outline-secondary me-1"><i class="bi bi-pencil"></i></a>
@@ -67,12 +84,142 @@
     </div>
     {% else %}
     <div class="text-center py-5" style="color:#475569;">
-      {% if q %}No devices match "{{ q }}".{% else %}No network devices yet. <a href="{% url 'network_add' %}">Add one.</a>{% endif %}
+      {% if q %}No devices match "{{ q }}".
+      {% else %}No network devices yet. <a href="{% url 'network_add' %}">Add one</a> or <button class="btn btn-link p-0" style="font-size:inherit;vertical-align:baseline;" onclick="openImport()">import a CSV</button>.
+      {% endif %}
     </div>
     {% endif %}
   </div>
 </div>
 
+<!-- ================================================================
+     BULK ASSIGN PANEL — fixed bottom bar, shown when rows selected
+     ================================================================ -->
+<div id="bulkPanel" style="
+  display:none;position:fixed;bottom:0;left:0;right:0;z-index:1050;
+  background:#1a2640;border-top:2px solid #3b82f6;padding:0.75rem 1.5rem;">
+  <div class="d-flex align-items-start gap-4 flex-wrap">
+
+    <div style="min-width:120px;padding-top:0.25rem;">
+      <div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;">Selected</div>
+      <div id="selectedCount" style="font-size:1.1rem;font-weight:700;color:#f1f5f9;"></div>
+    </div>
+
+    <!-- SNMP profiles -->
+    {% if snmp_profiles %}
+    <div>
+      <div style="font-size:0.7rem;color:#93c5fd;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.3rem;">SNMP</div>
+      <div class="d-flex flex-wrap gap-2">
+        {% for p in snmp_profiles %}
+        <label class="d-flex align-items-center gap-1" style="cursor:pointer;font-size:0.8rem;color:#94a3b8;">
+          <input type="checkbox" class="form-check-input bulk-snmp" value="{{ p.pk }}" style="margin:0;">
+          {{ p.name }} <span style="font-size:0.65rem;color:#475569;">({{ p.version }})</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- SSH profiles -->
+    {% if ssh_profiles %}
+    <div>
+      <div style="font-size:0.7rem;color:#86efac;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.3rem;">SSH</div>
+      <div class="d-flex flex-wrap gap-2">
+        {% for p in ssh_profiles %}
+        <label class="d-flex align-items-center gap-1" style="cursor:pointer;font-size:0.8rem;color:#94a3b8;">
+          <input type="checkbox" class="form-check-input bulk-ssh" value="{{ p.pk }}" style="margin:0;">
+          {{ p.name }}
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- HTTPS profiles -->
+    {% if https_profiles %}
+    <div>
+      <div style="font-size:0.7rem;color:#e9d5ff;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.3rem;">HTTPS</div>
+      <div class="d-flex flex-wrap gap-2">
+        {% for p in https_profiles %}
+        <label class="d-flex align-items-center gap-1" style="cursor:pointer;font-size:0.8rem;color:#94a3b8;">
+          <input type="checkbox" class="form-check-input bulk-https" value="{{ p.pk }}" style="margin:0;">
+          {{ p.name }}
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="d-flex flex-column gap-2 ms-auto" style="min-width:140px;">
+      <button class="btn btn-primary btn-sm" onclick="applyBulkAssign('add')">
+        <i class="bi bi-plus-lg me-1"></i> Add Profiles
+      </button>
+      <button class="btn btn-outline-danger btn-sm" onclick="applyBulkAssign('remove')">
+        <i class="bi bi-dash-lg me-1"></i> Remove Profiles
+      </button>
+      <button class="btn btn-outline-secondary btn-sm" onclick="clearSelection()">
+        Cancel
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ================================================================
+     IMPORT MODAL
+     ================================================================ -->
+<div class="modal fade" id="importModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content" style="background:#1e293b;border:1px solid #293548;">
+      <div class="modal-header" style="border-color:#293548;">
+        <h5 class="modal-title" style="font-size:0.95rem;">
+          <i class="bi bi-upload me-2 text-primary"></i>Import Network Devices from CSV
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="{% url 'network_import' %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="modal-body">
+          <div class="mb-4">
+            <label class="form-label form-label-sm">CSV File</label>
+            <input type="file" name="csv_file" accept=".csv" class="form-control" required>
+          </div>
+          <div style="background:#162032;border:1px solid #293548;border-radius:0.375rem;padding:1rem;font-size:0.8rem;color:#64748b;">
+            <div style="font-weight:600;color:#94a3b8;margin-bottom:0.5rem;">Column Reference</div>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <div><span style="color:#f1f5f9;">name</span> — required, must be unique</div>
+                <div><span style="color:#f1f5f9;">primary_ip / management_ip</span> — optional</div>
+                <div><span style="color:#f1f5f9;">device_type</span> — router, switch, firewall, ap, load_balancer, vpn, ups, other</div>
+                <div><span style="color:#f1f5f9;">status</span> — active, inactive, decommissioned, in_stock</div>
+              </div>
+              <div class="col-md-6">
+                <div><span style="color:#f1f5f9;">manufacturer, model, serial_number</span> — optional</div>
+                <div><span style="color:#f1f5f9;">firmware_version, location, description</span> — optional</div>
+                <div><span style="color:#f1f5f9;">snmp_profiles / ssh_profiles / https_profiles</span></div>
+                <div style="padding-left:1rem;">comma-separated profile names (must already exist)</div>
+              </div>
+            </div>
+            <div class="mt-2">
+              Existing devices (matched by name) are skipped. Download the template for a ready-to-fill example.
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer" style="border-color:#293548;">
+          <a href="{% url 'network_import_template' %}" class="btn btn-sm btn-outline-secondary me-auto">
+            <i class="bi bi-download me-1"></i> Download Template
+          </a>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-sm btn-primary">
+            <i class="bi bi-upload me-1"></i> Import
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Delete confirmation modal -->
 <div class="modal fade" id="deleteModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content" style="background:#1e293b;border:1px solid #293548;">
@@ -97,10 +244,102 @@
 
 {% block extra_scripts %}
 <script>
+const CSRF             = '{{ csrf_token }}';
+const BULK_ASSIGN_URL  = '{% url "network_bulk_assign" %}';
+
+// ── Selection ──────────────────────────────────────────────────────────────
+
+function getChecked() {
+  return [...document.querySelectorAll('.device-cb:checked')].map(cb => cb.value);
+}
+
+function toggleSelectAll(master) {
+  document.querySelectorAll('.device-cb').forEach(cb => cb.checked = master.checked);
+  onCheckChange();
+}
+
+function onCheckChange() {
+  const ids = getChecked();
+  const panel = document.getElementById('bulkPanel');
+  const count = document.getElementById('selectedCount');
+  const master = document.getElementById('selectAll');
+
+  if (ids.length) {
+    panel.style.display = '';
+    count.textContent   = `${ids.length} device${ids.length !== 1 ? 's' : ''}`;
+    document.getElementById('mainCard').style.marginBottom = '130px';
+  } else {
+    panel.style.display = 'none';
+    document.getElementById('mainCard').style.marginBottom = '';
+  }
+
+  const all = document.querySelectorAll('.device-cb');
+  master.indeterminate = ids.length > 0 && ids.length < all.length;
+  master.checked = ids.length === all.length && all.length > 0;
+}
+
+function clearSelection() {
+  document.querySelectorAll('.device-cb, #selectAll').forEach(cb => {
+    cb.checked = false;
+    cb.indeterminate = false;
+  });
+  onCheckChange();
+}
+
+// ── Bulk assign ────────────────────────────────────────────────────────────
+
+async function applyBulkAssign(action) {
+  const deviceIds = getChecked();
+  const snmpIds   = [...document.querySelectorAll('.bulk-snmp:checked')].map(c => c.value);
+  const sshIds    = [...document.querySelectorAll('.bulk-ssh:checked')].map(c => c.value);
+  const httpsIds  = [...document.querySelectorAll('.bulk-https:checked')].map(c => c.value);
+
+  if (!snmpIds.length && !sshIds.length && !httpsIds.length) {
+    alert('Select at least one profile to apply.');
+    return;
+  }
+
+  const res  = await fetch(BULK_ASSIGN_URL, {
+    method:  'POST',
+    headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+    body:    JSON.stringify({device_ids: deviceIds, snmp_ids: snmpIds,
+                             ssh_ids: sshIds, https_ids: httpsIds, action}),
+  });
+  const data = await res.json();
+
+  if (data.success) {
+    const verb = action === 'remove' ? 'removed from' : 'added to';
+    // Quick visual feedback then reload to show updated badges
+    document.getElementById('bulkPanel').innerHTML =
+      `<div style="color:#86efac;font-size:0.9rem;padding:0.5rem;">
+         <i class="bi bi-check-circle-fill me-2"></i>
+         Profiles ${verb} ${data.count} device${data.count !== 1 ? 's' : ''}. Refreshing…
+       </div>`;
+    setTimeout(() => location.reload(), 900);
+  } else {
+    alert(data.error || 'Something went wrong.');
+  }
+}
+
+// ── Import modal ───────────────────────────────────────────────────────────
+
+function openImport() {
+  new bootstrap.Modal(document.getElementById('importModal')).show();
+}
+
+// ── Delete modal ───────────────────────────────────────────────────────────
+
 function confirmDelete(url, name) {
   document.getElementById('deleteForm').action = url;
   document.getElementById('deleteName').textContent = name;
   new bootstrap.Modal(document.getElementById('deleteModal')).show();
 }
+
+// Open import modal automatically if server redirected back after an error
+{% if messages %}
+{% for msg in messages %}{% if 'Import' in msg.message or 'import' in msg.message %}
+// openImport();  // optionally re-open on error
+{% endif %}{% endfor %}
+{% endif %}
 </script>
 {% endblock %}

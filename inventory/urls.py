@@ -9,6 +9,13 @@ urlpatterns = [
     path('network/<int:pk>/edit/',      views.network_edit,   name='network_edit'),
     path('network/<int:pk>/delete/',    views.network_delete, name='network_delete'),
 
+    # CSV import
+    path('network/import-template/', views.network_import_template, name='network_import_template'),
+    path('network/import/',          views.network_import,          name='network_import'),
+
+    # Bulk profile assignment
+    path('network/bulk-assign/',     views.network_bulk_assign,     name='network_bulk_assign'),
+
     # Connectivity tests
     path('network/<int:device_pk>/test-snmp/<int:profile_pk>/', views.test_snmp, name='test_snmp'),
     path('network/<int:device_pk>/test-ssh/<int:profile_pk>/',  views.test_ssh,  name='test_ssh'),
