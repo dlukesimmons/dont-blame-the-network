@@ -311,7 +311,10 @@
 
         <div class="sidebar-section-label mt-2">Tools</div>
         <a href="{% url 'icmp_scan' %}" class="sidebar-link {% if request.resolver_match.url_name == 'icmp_scan' %}active{% endif %}">
-            <i class="bi bi-radar"></i> ICMP Scan
+            <i class="bi bi-radar"></i> Network Scan
+        </a>
+        <a href="{% url 'snmp_scan' %}" class="sidebar-link {% if request.resolver_match.url_name == 'snmp_scan' %}active{% endif %}">
+            <i class="bi bi-reception-4"></i> SNMP Scan
         </a>
         <a href="{% url 'bulk_scan' %}" class="sidebar-link {% if request.resolver_match.url_name == 'bulk_scan' %}active{% endif %}">
             <i class="bi bi-layers"></i> Bulk ICMP Scan

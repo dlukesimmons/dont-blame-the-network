@@ -7,6 +7,10 @@ import threading
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Common ports checked by the TCP scan — covers SSH, Telnet, HTTP, HTTPS,
+# alt-HTTP/HTTPS, SNMP (UDP probe handled separately in SNMP scan).
+TCP_SCAN_PORTS = '22,23,80,443,8080,8443'
+
 
 MAX_PREFIX   = 16   # Refuse anything larger than /16
 MAX_NETWORKS = 20   # Bulk scan cap
@@ -320,3 +324,216 @@ def _parse_nbstat_response(data: bytes) -> str:
                 return name
 
     return ''
+
+
+# ---------------------------------------------------------------------------
+# TCP port scan
+# ---------------------------------------------------------------------------
+
+def run_tcp_scan(network: str, ports: str = TCP_SCAN_PORTS,
+                 resolve_dns: bool = False, resolve_netbios: bool = False) -> dict:
+    """
+    Scan *network* for hosts with open TCP ports using nmap.
+    Unlike a ping sweep, this only reports hosts that are actually listening
+    on at least one port — useful when a firewall answers ICMP for the whole
+    subnet and makes every IP appear alive.
+    """
+    prefix_len   = int(network.split('/')[1])
+    nmap_timeout = _nmap_timeout(prefix_len)
+
+    # --open: only show hosts with at least one open port
+    # -Pn:    skip host-discovery ping — just probe the ports directly
+    # -n:     no DNS inside nmap (we do it in parallel afterwards)
+    cmd = ['nmap', '-sT', '-Pn', '--open', '-T4', '-n',
+           '-p', ports, '--oX', '-', network]
+
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=nmap_timeout)
+    except subprocess.TimeoutExpired:
+        return _error(f'TCP scan timed out after {nmap_timeout}s.')
+    except FileNotFoundError:
+        return _error('nmap is not installed or not on PATH.')
+
+    if proc.returncode != 0 and not proc.stdout.strip():
+        return _error(f'nmap exited with code {proc.returncode}: {proc.stderr.strip()}')
+
+    hosts = _parse_tcp_scan(proc.stdout)
+    up_ips = [h['ip'] for h in hosts if h['status'] == 'up']
+
+    if up_ips and (resolve_dns or resolve_netbios):
+        with ThreadPoolExecutor(max_workers=2) as outer:
+            dns_future = outer.submit(_resolve_dns_all, up_ips) if resolve_dns     else None
+            nb_future  = outer.submit(_query_netbios_all, up_ips) if resolve_netbios else None
+
+        dns_map = dns_future.result() if dns_future else {}
+        nb_map  = nb_future.result()  if nb_future  else {}
+
+        if resolve_netbios:
+            missing = [ip for ip in up_ips if not nb_map.get(ip)]
+            if missing:
+                rdns = {ip: dns_map[ip] for ip in missing if ip in dns_map} if dns_map \
+                       else _resolve_dns_all(missing, per_host_timeout=2.0)
+                for ip, fqdn in rdns.items():
+                    short = fqdn.split('.')[0]
+                    if short:
+                        nb_map[ip] = {'name': short, 'source': 'rdns'}
+
+        for h in hosts:
+            ip = h['ip']
+            if resolve_dns:
+                h['dns_name'] = dns_map.get(ip, '')
+            if resolve_netbios:
+                result = nb_map.get(ip) or {}
+                h['netbios_name']   = result.get('name', '')
+                h['netbios_source'] = result.get('source', '')
+
+    up_count = sum(1 for h in hosts if h['status'] == 'up')
+    return {'hosts': hosts, 'up_count': up_count, 'total_count': len(hosts), 'error': None}
+
+
+def _parse_tcp_scan(xml_text: str) -> list:
+    """Parse nmap XML from a TCP port scan into a list of host dicts."""
+    hosts = []
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return hosts
+
+    for host_el in root.findall('host'):
+        status_el = host_el.find('status')
+        addr_el   = host_el.find("address[@addrtype='ipv4']")
+        if addr_el is None or status_el is None:
+            continue
+
+        # Collect the open ports
+        open_ports = []
+        for port_el in host_el.findall('.//port'):
+            state_el = port_el.find('state')
+            if state_el is not None and state_el.get('state') == 'open':
+                portid  = port_el.get('portid', '')
+                svc_el  = port_el.find('service')
+                svc     = svc_el.get('name', '') if svc_el is not None else ''
+                open_ports.append({'port': portid, 'service': svc})
+
+        # nmap with --open only includes hosts that have open ports, but
+        # guard anyway: only mark 'up' if we actually found open ports.
+        ip     = addr_el.get('addr', '')
+        status = 'up' if open_ports else status_el.get('state', 'unknown')
+
+        hosts.append({
+            'ip':             ip,
+            'status':         status,
+            'open_ports':     open_ports,
+            'dns_name':       '',
+            'netbios_name':   '',
+            'netbios_source': '',
+        })
+
+    hosts.sort(key=lambda h: ipaddress.ip_address(h['ip']))
+    return hosts
+
+
+# ---------------------------------------------------------------------------
+# SNMP scan
+# ---------------------------------------------------------------------------
+
+def _snmp_probe(ip: str, base_cmd: list) -> dict:
+    """
+    Try to fetch sysName.0 and sysDescr.0 from *ip*.
+    sysName is fetched alone first (it is always single-line); sysDescr is
+    fetched separately and joined so multi-line Cisco descriptions don't
+    corrupt the sysName value.
+    Returns a result dict regardless of success.
+    """
+    # Timeout flags: -t 1 = 1s per attempt, -r 0 = no retries → fast fail
+    probe = base_cmd + ['-t', '1', '-r', '0']
+
+    def _get(oid):
+        try:
+            r = subprocess.run(probe + [ip, oid], capture_output=True, text=True, timeout=3)
+            if r.returncode == 0:
+                val = r.stdout.strip().strip('"')
+                if val and not any(val.lower().startswith(s)
+                                   for s in ('no such', 'no more', 'end of mib')):
+                    return val
+        except subprocess.TimeoutExpired:
+            pass
+        return ''
+
+    sys_name  = _get('1.3.6.1.2.1.1.5.0')
+    if not sys_name:
+        # No SNMP response — device absent or wrong credentials
+        return {'ip': ip, 'status': 'no_response',
+                'sys_name': '', 'sys_descr': '', 'manufacturer': '', 'os_version': ''}
+
+    # Fetch sysDescr separately; join lines since it can be multi-line
+    try:
+        rd = subprocess.run(probe + [ip, '1.3.6.1.2.1.1.1.0'],
+                            capture_output=True, text=True, timeout=4)
+        sys_descr = ' '.join(
+            l.strip().strip('"') for l in rd.stdout.strip().splitlines() if l.strip()
+        ) if rd.returncode == 0 else ''
+    except subprocess.TimeoutExpired:
+        sys_descr = ''
+
+    # Re-use the sysDescr parser from inventory to get manufacturer/version
+    mfr, ver = '', ''
+    dl = sys_descr.lower()
+    for vendor, name in [
+        ('cisco', 'Cisco'), ('juniper', 'Juniper'), ('aruba', 'Aruba'),
+        ('hp ', 'HP'), ('palo alto', 'Palo Alto'), ('fortinet', 'Fortinet'),
+        ('opengear', 'Opengear'), ('mikrotik', 'MikroTik'),
+        ('ubiquiti', 'Ubiquiti'), ('extreme', 'Extreme Networks'),
+        ('dell', 'Dell'), ('netgear', 'Netgear'), ('brocade', 'Brocade'),
+    ]:
+        if vendor in dl:
+            mfr = name
+            break
+    m = re.search(r'[Vv]ersion\s+([\d][^\s,;]+)', sys_descr)
+    if m:
+        ver = m.group(1).rstrip(',.')
+
+    return {
+        'ip':           ip,
+        'status':       'up',
+        'sys_name':     sys_name,
+        'sys_descr':    sys_descr[:120],
+        'manufacturer': mfr,
+        'os_version':   ver,
+    }
+
+
+def run_snmp_scan_stream(network: str, profile):
+    """
+    Generator that yields result dicts for every host in *network*.
+    Results are emitted as they complete (unordered).  Callers should
+    wrap each dict in a JSON SSE event.
+
+    *profile* is a credentials.SNMPProfile model instance.
+    """
+    from inventory.views import _snmp_base_cmd   # avoids circular import at module level
+
+    net   = ipaddress.ip_network(network, strict=False)
+    hosts = [str(ip) for ip in net.hosts()]
+    base  = _snmp_base_cmd(profile)
+
+    # Remove the built-in -r/-t flags from _snmp_base_cmd — _snmp_probe sets
+    # its own tighter values (-t 1 -r 0) so the scan stays fast.
+    # _snmp_base_cmd already includes '-r 1 -t 5'; replace them in _snmp_probe.
+
+    total = len(hosts)
+    done  = 0
+
+    with ThreadPoolExecutor(max_workers=50) as pool:
+        futures = {pool.submit(_snmp_probe, ip, base): ip for ip in hosts}
+        for future in as_completed(futures):
+            done += 1
+            try:
+                result = future.result()
+            except Exception as exc:
+                result = {'ip': futures[future], 'status': 'error',
+                          'sys_name': '', 'sys_descr': str(exc),
+                          'manufacturer': '', 'os_version': ''}
+            result['progress'] = done
+            result['total']    = total
+            yield result

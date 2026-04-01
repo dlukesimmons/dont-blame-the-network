@@ -24,66 +24,177 @@ from .models import DeviceDiscoveryResult, DiscoverySnapshot
 # ── Manufacturer command profiles ──────────────────────────────────────────
 
 MANUFACTURER_PROFILES = {
+    # Firepower/FTD must come before 'cisco' — manufacturer is "Cisco" but
+    # model contains "Firepower" or "FTD".  SSH drops into FTD CLISH; we must
+    # enter diagnostic-cli before any IOS-style show commands will work.
+    'firepower': {
+        'label':  'Cisco Firepower/FTD',
+        'pre':    ['system support diagnostic-cli', 'terminal length 0'],
+        'arp':    'show arp',
+        'mac':    'show mac address-table',
+        'extras': [
+            'show version',
+            'show inventory',
+            'show interface ip brief',
+            'show interface',
+            'show ip interface brief',
+            'show conn count',
+            'show route',
+            'show cdp neighbors detail',
+            'show lldp neighbors detail',
+            'show running-config',
+        ],
+    },
+    'ftd': {
+        'label':  'Cisco FTD',
+        'pre':    ['system support diagnostic-cli', 'terminal length 0'],
+        'arp':    'show arp',
+        'mac':    'show mac address-table',
+        'extras': [
+            'show version',
+            'show inventory',
+            'show interface ip brief',
+            'show interface',
+            'show ip interface brief',
+            'show conn count',
+            'show route',
+            'show cdp neighbors detail',
+            'show lldp neighbors detail',
+            'show running-config',
+        ],
+    },
     'cisco': {
-        'label': 'Cisco IOS/NX-OS',
-        'pre':   ['terminal length 0'],
-        'arp':   'show ip arp',
-        'mac':   'show mac address-table',
+        'label':  'Cisco IOS/NX-OS',
+        'pre':    ['terminal length 0'],
+        'arp':    'show ip arp',
+        'mac':    'show mac address-table',
+        'extras': [
+            'show version',
+            'show inventory',
+            'show module',
+            'show interfaces status',
+            'show vlan brief',
+            'show ip interface brief',
+            'show etherchannel summary',
+            'show environment',
+            'show power inline',
+            'show cdp neighbors detail',
+            'show lldp neighbors detail',
+            'show running-config',
+        ],
     },
     'juniper': {
-        'label': 'Juniper',
-        'pre':   ['set cli screen-length 0'],
-        'arp':   'show arp',
-        'mac':   'show ethernet-switching table',
+        'label':  'Juniper',
+        'pre':    ['set cli screen-length 0'],
+        'arp':    'show arp',
+        'mac':    'show ethernet-switching table',
+        'extras': [
+            'show version',
+            'show chassis hardware',
+            'show interfaces terse',
+            'show lldp neighbors',
+            'show configuration',
+        ],
     },
     'aruba': {
-        'label': 'Aruba',
-        'pre':   ['no page'],
-        'arp':   'show arp',
-        'mac':   'show mac-address-table',
+        'label':  'Aruba',
+        'pre':    ['no page'],
+        'arp':    'show arp',
+        'mac':    'show mac-address-table',
+        'extras': [
+            'show version',
+            'show system',
+            'show interfaces',
+            'show vlan',
+            'show lldp info remote-device',
+        ],
     },
     'hp': {
-        'label': 'HP/Aruba',
-        'pre':   ['no page'],
-        'arp':   'show arp',
-        'mac':   'show mac-address-table',
+        'label':  'HP/Aruba',
+        'pre':    ['no page'],
+        'arp':    'show arp',
+        'mac':    'show mac-address-table',
+        'extras': [
+            'show version',
+            'show system',
+            'show interfaces',
+            'show vlan',
+            'show lldp info remote-device',
+        ],
     },
     'extreme': {
-        'label': 'Extreme Networks',
-        'pre':   ['disable clipaging'],
-        'arp':   'show arp',
-        'mac':   'show fdb',
+        'label':  'Extreme Networks',
+        'pre':    ['disable clipaging'],
+        'arp':    'show arp',
+        'mac':    'show fdb',
+        'extras': [
+            'show version',
+            'show switch',
+            'show ports info',
+            'show vlan',
+            'show lldp neighbors',
+        ],
     },
     'fortinet': {
-        'label': 'Fortinet',
-        'pre':   [],
-        'arp':   'get system arp',
-        'mac':   'diagnose netlink brctl name host bridge',
+        'label':  'Fortinet',
+        'pre':    [],
+        'arp':    'get system arp',
+        'mac':    'diagnose netlink brctl name host bridge',
+        'extras': [
+            'get system status',
+            'get system interface',
+            'get router info routing-table all',
+        ],
     },
 }
 _DEFAULT_MFR = MANUFACTURER_PROFILES['cisco']
 
 
-def _get_mfr_profile(manufacturer):
-    m = (manufacturer or '').lower()
+# Extra keywords that map to a profile key — checked against manufacturer+model haystack.
+# Needed when the device model string doesn't literally contain the profile key
+# (e.g. model "FPR-1120" must map to 'firepower'; "ASA5505" → 'cisco').
+_MFR_ALIASES = {
+    'fpr':        'firepower',  # Cisco FPR-1xxx/2xxx/4xxx models
+    'firepower':  'firepower',
+    'ftd':        'firepower',
+}
+
+
+def _get_mfr_profile(device):
+    manufacturer = getattr(device, 'manufacturer', None) or (device if isinstance(device, str) else '')
+    model        = getattr(device, 'model', '') or ''
+    haystack     = f"{manufacturer} {model}".lower()
+
+    # Check aliases first (more specific than profile keys)
+    for alias, profile_key in _MFR_ALIASES.items():
+        if alias in haystack:
+            return MANUFACTURER_PROFILES[profile_key]
+
+    # Fall back to profile key name substring match
     for key, prof in MANUFACTURER_PROFILES.items():
-        if key in m:
+        if key in haystack:
             return prof
+
     return _DEFAULT_MFR
 
 
 # ── SSH helpers ─────────────────────────────────────────────────────────────
 
-def _recv_until_prompt(shell, timeout=30):
+def _recv_until_prompt(shell, timeout=60):
     """Read from shell until a CLI prompt character is detected."""
     buf = b''
     deadline = time.time() + timeout
     while time.time() < deadline:
         if shell.recv_ready():
-            buf += shell.recv(8192)
+            buf += shell.recv(65536)
             decoded = buf.decode('utf-8', errors='replace')
-            if re.search(r'[#>]\s*$', decoded.rstrip()):
+            stripped = decoded.rstrip()
+            if re.search(r'[#>]\s*$', stripped):
                 break
+            # Pagination prompt — send 'q' to abort rather than hanging
+            if re.search(r'--\s*[Mm]ore\s*--', decoded):
+                shell.send('q')
+                time.sleep(0.2)
         else:
             time.sleep(0.05)
     return buf.decode('utf-8', errors='replace')
@@ -234,13 +345,15 @@ def _process_device(device, snapshot_id, queue):
             queue.put({**event, 'status': 'no_ssh', 'error': ''})
             return
 
-        mfr = _get_mfr_profile(device.manufacturer)
+        mfr = _get_mfr_profile(device)
         try:
-            outputs = _run_device_commands(
-                profile, ip, mfr['pre'], [mfr['arp'], mfr['mac']]
-            )
-            result.arp_output = outputs.get(mfr['arp'], '')
-            result.mac_output = outputs.get(mfr['mac'], '')
+            all_cmds = [mfr['arp'], mfr['mac']] + mfr.get('extras', [])
+            outputs = _run_device_commands(profile, ip, mfr['pre'], all_cmds)
+            result.arp_output    = outputs.get(mfr['arp'], '')
+            result.mac_output    = outputs.get(mfr['mac'], '')
+            result.extra_outputs = {
+                cmd: outputs.get(cmd, '') for cmd in mfr.get('extras', [])
+            }
             result.status = DeviceDiscoveryResult.STATUS_SUCCESS
             result.error  = ''
         except Exception as exc:

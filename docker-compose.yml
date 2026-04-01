@@ -44,3 +44,11 @@ services:
       - NET_ADMIN
     volumes:
       - ./staticfiles:/app/staticfiles
+    networks:
+      - default
+      - ftd-vpn_default
+
+networks:
+  default: {}
+  ftd-vpn_default:
+    external: true

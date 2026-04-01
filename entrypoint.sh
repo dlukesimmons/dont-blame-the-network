@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+# Add split-tunnel route through ftd-vpn container if available
+FTD_IP=$(getent hosts ftd-vpn 2>/dev/null | awk '{print $1}')
+if [ -n "$FTD_IP" ]; then
+    ip route add 10.0.69.0/24 via "$FTD_IP" 2>/dev/null && \
+        echo "VPN route: 10.0.69.0/24 via ftd-vpn ($FTD_IP)" || \
+        echo "VPN route already set or failed — continuing"
+fi
+
 echo "Waiting for MySQL to be ready..."
 until python -c "
 import pymysql, os, sys

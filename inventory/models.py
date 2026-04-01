@@ -39,6 +39,12 @@ class NetworkDevice(models.Model):
     serial_number    = models.CharField(max_length=100, blank=True)
     firmware_version = models.CharField(max_length=100, blank=True)
 
+    # SNMP-populated fields
+    snmp_sysname = models.CharField(max_length=200, blank=True,
+                                    help_text="sysName from SNMP poll (device's own hostname)")
+    os_version   = models.CharField(max_length=200, blank=True,
+                                    help_text="OS/software version from SNMP poll")
+
     # Location & notes
     location    = models.CharField(max_length=200, blank=True)
     description = models.TextField(blank=True)

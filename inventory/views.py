@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import re
 import subprocess
 
 from django.contrib.auth.decorators import login_required
@@ -24,7 +25,8 @@ def _device_ip(device):
     return str(device.primary_ip or device.management_ip or '') or None
 
 
-def _snmp_test(profile, ip):
+def _snmp_base_cmd(profile):
+    """Return the snmpget base command list for a given profile (no OIDs, no host)."""
     base = ['snmpget', '-r', '1', '-t', '5', '-Oqv']
     if profile.version == SNMPProfile.V3:
         has_auth = bool(profile.auth_protocol and profile.auth_password)
@@ -38,7 +40,11 @@ def _snmp_test(profile, ip):
     else:
         version_flag = '1' if profile.version == SNMPProfile.V1 else '2c'
         cmd = base + [f'-v{version_flag}', '-c', profile.community]
-    cmd += [ip, '1.3.6.1.2.1.1.5.0', '1.3.6.1.2.1.1.1.0']
+    return cmd
+
+
+def _snmp_test(profile, ip):
+    cmd = _snmp_base_cmd(profile) + [ip, '1.3.6.1.2.1.1.5.0', '1.3.6.1.2.1.1.1.0']
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=12)
     except subprocess.TimeoutExpired:
@@ -49,6 +55,284 @@ def _snmp_test(profile, ip):
         return {'success': False, 'error': err}
     lines = [l.strip().strip('"') for l in r.stdout.strip().splitlines() if l.strip()]
     return {'success': True, 'sys_name': lines[0] if lines else '', 'sys_desc': lines[1] if len(lines) > 1 else ''}
+
+
+def _parse_sys_descr(desc):
+    """Parse SNMP sysDescr to extract manufacturer hint and OS version string."""
+    if not desc:
+        return {}
+    result = {}
+    dl = desc.lower()
+
+    # Manufacturer
+    if 'cisco' in dl:
+        result['manufacturer'] = 'Cisco'
+    elif 'juniper' in dl:
+        result['manufacturer'] = 'Juniper'
+    elif dl.startswith('hp ') or ' hp ' in dl or 'hewlett' in dl:
+        result['manufacturer'] = 'HP'
+    elif 'aruba' in dl:
+        result['manufacturer'] = 'Aruba'
+    elif 'palo alto' in dl or 'pan-os' in dl:
+        result['manufacturer'] = 'Palo Alto Networks'
+    elif 'fortinet' in dl or 'fortigate' in dl or 'forticos' in dl:
+        result['manufacturer'] = 'Fortinet'
+    elif 'mikrotik' in dl or 'routeros' in dl:
+        result['manufacturer'] = 'MikroTik'
+    elif 'ubiquiti' in dl or 'edgeos' in dl or 'unifi' in dl:
+        result['manufacturer'] = 'Ubiquiti'
+    elif 'extreme' in dl:
+        result['manufacturer'] = 'Extreme Networks'
+    elif 'dell' in dl:
+        result['manufacturer'] = 'Dell'
+    elif 'netgear' in dl:
+        result['manufacturer'] = 'Netgear'
+    elif 'opengear' in dl:
+        result['manufacturer'] = 'Opengear'
+    elif 'apc' in dl or 'american power' in dl:
+        result['manufacturer'] = 'APC'
+    elif 'brocade' in dl:
+        result['manufacturer'] = 'Brocade'
+
+    # OS version — "Version X.Y.Z" pattern covers IOS, NX-OS, ASA, etc.
+    m = re.search(r'[Vv]ersion\s+([\d][^\s,;]+)', desc)
+    if m:
+        result['version'] = m.group(1).rstrip(',.')
+    # HP revision pattern: "revision KA.16.05"
+    elif re.search(r'revision\s+([A-Z]{1,3}[\.\d]+)', desc, re.IGNORECASE):
+        m2 = re.search(r'revision\s+([A-Z]{1,3}[\.\d]+)', desc, re.IGNORECASE)
+        result['version'] = m2.group(1)
+
+    return result
+
+
+def _infer_device_type(desc):
+    """Try to infer device_type choice value from sysDescr."""
+    dl = (desc or '').lower()
+    if any(k in dl for k in ['switch', 'catalyst', 'nexus', 'stackable', 'c9', 'ws-c']):
+        return 'switch'
+    if any(k in dl for k in ['router', ' asr', ' isr', ' crs', ' mx ', ' srx ']):
+        return 'router'
+    if any(k in dl for k in ['firewall', 'adaptive security', 'fortigate', 'palo alto',
+                               'ftd', ' asa ', 'checkpoint']):
+        return 'firewall'
+    if any(k in dl for k in ['access point', 'wireless lan', ' ap ']):
+        return 'ap'
+    if any(k in dl for k in ['load balancer', 'big-ip', 'netscaler', 'citrix adc']):
+        return 'load_balancer'
+    return ''
+
+
+# SNMP OIDs used for device inventory polling
+_OID_SYS_DESCR    = '1.3.6.1.2.1.1.1.0'
+_OID_SYS_NAME     = '1.3.6.1.2.1.1.5.0'
+_OID_SYS_LOCATION = '1.3.6.1.2.1.1.6.0'
+_OID_SYS_OBJECTID = '1.3.6.1.2.1.1.2.0'
+
+# Entity MIB column OIDs (no .instance suffix — walked to find first valid entry).
+# Using snmpwalk instead of snmpget .1 because different devices store the chassis
+# entry at different indices (Firepower, WLC, etc. don't always use index 1).
+_COL_ENT_SW_REV = '1.3.6.1.2.1.47.1.1.1.1.10'   # entPhysicalSoftwareRev
+_COL_ENT_SERIAL = '1.3.6.1.2.1.47.1.1.1.1.11'   # entPhysicalSerialNum
+_COL_ENT_MFG    = '1.3.6.1.2.1.47.1.1.1.1.12'   # entPhysicalMfgName
+_COL_ENT_MODEL  = '1.3.6.1.2.1.47.1.1.1.1.13'   # entPhysicalModelName
+
+# Vendor-specific OIDs for devices that don't support entity MIB.
+# Each entry: (sysObjectID prefix, {model_oid, serial_oid, sw_rev_oid})
+_VENDOR_OIDS = [
+    # Opengear (enterprise 25049) — ogSystemMIB under .10.19.1
+    ('1.3.6.1.4.1.25049', {
+        'model':  '1.3.6.1.4.1.25049.10.19.1.5.0',   # ogSystemModelName (proper case)
+        'serial': '1.3.6.1.4.1.25049.10.19.1.2.0',   # ogSystemSerialNumber
+        'sw_rev': '1.3.6.1.4.1.25049.10.19.1.3.0',   # ogSystemFirmwareVersion
+    }),
+]
+
+# Strings snmpget/snmpwalk return (rc=0) when an OID has no data
+_SNMP_NULL = ('no such instance', 'no such object', 'no more variables', 'end of mib')
+
+
+def _is_snmp_null(val):
+    return bool(val) and any(val.strip().lower().startswith(s) for s in _SNMP_NULL)
+
+
+def _snmp_clean(val):
+    """Return '' if val is an SNMP error/null string, else return val unchanged."""
+    return '' if _is_snmp_null(val) else (val or '')
+
+
+def _snmp_update_device(device):
+    """
+    Try each assigned SNMP profile in order.  On first success, poll device
+    inventory OIDs, update model fields, save, and return result dict.
+
+    Returns dict with keys: success, profile, fields_updated, error.
+    """
+    ip = _device_ip(device)
+    if not ip:
+        return {'success': False, 'profile': None, 'fields_updated': {}, 'error': 'No IP configured'}
+
+    profiles = list(device.snmp_profiles.all())
+    if not profiles:
+        return {'success': False, 'profile': None, 'fields_updated': {}, 'error': 'No SNMP profiles assigned'}
+
+    def _get(oid, timeout=10):
+        """snmpget a single OID. Returns clean string or '' on any error/null."""
+        try:
+            r = subprocess.run(base + [ip, oid], capture_output=True, text=True, timeout=timeout)
+            if r.returncode == 0:
+                return _snmp_clean(r.stdout.strip().strip('"'))
+        except subprocess.TimeoutExpired:
+            pass
+        return ''
+
+    def _walk_first(col_oid, timeout=12):
+        """Walk an entity MIB column and return the first non-empty, non-null value.
+        Uses snmpwalk so devices that store the chassis entry at any index work."""
+        walk = ['snmpwalk'] + base[1:]   # swap snmpget → snmpwalk, keep flags
+        try:
+            r = subprocess.run(walk + [ip, col_oid], capture_output=True, text=True, timeout=timeout)
+            for line in r.stdout.strip().splitlines():
+                val = _snmp_clean(line.strip().strip('"'))
+                if val:
+                    return val
+        except subprocess.TimeoutExpired:
+            pass
+        return ''
+
+    last_error = ''
+    for profile in profiles:
+        base = _snmp_base_cmd(profile)
+
+        # ── sysName — verify profile works first ─────────────────────────────
+        try:
+            probe = subprocess.run(base + [ip, _OID_SYS_NAME],
+                                   capture_output=True, text=True, timeout=12)
+            if probe.returncode != 0:
+                raw = (probe.stderr or probe.stdout).strip()
+                last_error = raw.split('\n')[0] if raw else 'No response'
+                continue
+            sys_name = _snmp_clean(probe.stdout.strip().strip('"'))
+        except subprocess.TimeoutExpired:
+            last_error = 'Timed out'
+            continue
+
+        # ── sysDescr — can be multi-line; join all output lines ──────────────
+        try:
+            rd = subprocess.run(base + [ip, _OID_SYS_DESCR],
+                                capture_output=True, text=True, timeout=10)
+            sys_descr = ' '.join(
+                _snmp_clean(l.strip().strip('"'))
+                for l in rd.stdout.strip().splitlines() if l.strip()
+            ) if rd.returncode == 0 else ''
+        except subprocess.TimeoutExpired:
+            sys_descr = ''
+
+        # ── sysObjectID — used to match vendor-specific OID tables ───────────
+        sys_oid = _get(_OID_SYS_OBJECTID, timeout=8)
+
+        # ── sysLocation — best-effort ─────────────────────────────────────────
+        sys_location = _get(_OID_SYS_LOCATION, timeout=8)
+
+        # ── Entity MIB — walk each column to find chassis entry at any index ──
+        # Devices like Firepower/FTD and WLC don't always use index .1
+        entity = {
+            'sw_rev': _walk_first(_COL_ENT_SW_REV),
+            'serial': _walk_first(_COL_ENT_SERIAL),
+            'mfg':    _walk_first(_COL_ENT_MFG),
+            'model':  _walk_first(_COL_ENT_MODEL),
+        }
+
+        # ── Vendor-specific OIDs — used when entity MIB is absent/empty ──────
+        # Match on sysObjectID prefix; fetch individual scalar OIDs directly.
+        vendor = {}
+        if not all([entity['model'], entity['serial'], entity['sw_rev']]):
+            # sysObjectID may come back as "iso.3.6.1…" — "iso." is "1." in OID notation
+            sys_oid_norm = re.sub(r'^iso\.', '1.', sys_oid) if sys_oid else ''
+            for oid_prefix, oid_map in _VENDOR_OIDS:
+                if sys_oid_norm and sys_oid_norm.startswith(oid_prefix):
+                    if not entity['model']  and 'model'  in oid_map:
+                        vendor['model']  = _get(oid_map['model'])
+                    if not entity['serial'] and 'serial' in oid_map:
+                        vendor['serial'] = _get(oid_map['serial'])
+                    if not entity['sw_rev'] and 'sw_rev' in oid_map:
+                        vendor['sw_rev'] = _get(oid_map['sw_rev'])
+                    break
+
+        parsed = _parse_sys_descr(sys_descr)
+
+        # ── Build field updates: entity MIB > vendor OIDs > sysDescr parse ───
+        updates = {}
+
+        if sys_name:
+            updates['snmp_sysname'] = sys_name
+
+        mfg = entity.get('mfg') or parsed.get('manufacturer', '')
+        if mfg:
+            updates['manufacturer'] = mfg
+
+        model = entity.get('model') or vendor.get('model', '')
+        if model:
+            updates['model'] = model
+
+        serial = entity.get('serial') or vendor.get('serial', '')
+        if serial:
+            updates['serial_number'] = serial
+
+        ver = entity.get('sw_rev') or vendor.get('sw_rev') or parsed.get('version', '')
+        if ver:
+            updates['os_version'] = ver
+
+        # Infer device_type only if not already set
+        if not device.device_type:
+            inferred = _infer_device_type(sys_descr)
+            if inferred:
+                updates['device_type'] = inferred
+
+        # Location — only populate if currently blank
+        if sys_location and not device.location:
+            updates['location'] = sys_location
+
+        # ── Scrub any SNMP null strings previously saved to the DB ───────────
+        # If a field wasn't updated AND the DB value is a leftover error string,
+        # clear it so it doesn't keep showing up.
+        _clearable = ('manufacturer', 'model', 'serial_number', 'os_version', 'snmp_sysname')
+        for field in _clearable:
+            if field not in updates and _is_snmp_null(getattr(device, field, '')):
+                updates[field] = ''
+
+        # ── Save ──────────────────────────────────────────────────────────────
+        if updates:
+            for field, value in updates.items():
+                setattr(device, field, value)
+            device.save(update_fields=list(updates.keys()))
+
+        # Response: use updated value, then fresh DB value — never a null string
+        def _resp(field):
+            v = updates.get(field)
+            if v is not None:
+                return v
+            return _snmp_clean(getattr(device, field, '') or '')
+
+        return {
+            'success':        True,
+            'profile':        profile.name,
+            'fields_updated': {k: v for k, v in updates.items() if v},
+            'error':          '',
+            'snmp_sysname':   _resp('snmp_sysname'),
+            'manufacturer':   _resp('manufacturer'),
+            'model':          _resp('model'),
+            'serial_number':  _resp('serial_number'),
+            'os_version':     _resp('os_version'),
+            'device_type':    _resp('device_type'),
+        }
+
+    return {
+        'success': False,
+        'profile': None,
+        'fields_updated': {},
+        'error': last_error or 'All SNMP profiles failed',
+    }
 
 
 def _ssh_test(profile, ip):
@@ -348,6 +632,60 @@ def test_ssh(request, device_pk, profile_pk):
     if not ip:
         return JsonResponse({'success': False, 'error': 'No IP address configured on this device.'})
     return JsonResponse(_ssh_test(profile, ip))
+
+
+# ---------------------------------------------------------------------------
+# Bulk SNMP device update
+# ---------------------------------------------------------------------------
+
+@login_required
+@require_POST
+def network_snmp_update(request):
+    """Poll a single device via its assigned SNMP profiles and update inventory fields."""
+    body      = json.loads(request.body)
+    device_id = body.get('device_id')
+    device    = get_object_or_404(NetworkDevice, pk=device_id)
+    result    = _snmp_update_device(device)
+    return JsonResponse(result)
+
+
+@login_required
+@require_POST
+def network_quick_add(request):
+    """
+    Create a NetworkDevice from a scan result.
+    Uses the IP as both the device name and management IP.
+    If a device with that name or management IP already exists, returns it instead.
+    """
+    body = json.loads(request.body)
+    ip   = (body.get('ip') or '').strip()
+    name = (body.get('name') or ip).strip() or ip
+
+    if not ip:
+        return JsonResponse({'error': 'IP address is required.'}, status=400)
+
+    # Check for existing device by name or management IP
+    existing = (NetworkDevice.objects.filter(name=name).first() or
+                NetworkDevice.objects.filter(management_ip=ip).first() or
+                NetworkDevice.objects.filter(primary_ip=ip).first())
+    if existing:
+        return JsonResponse({
+            'exists':      True,
+            'device_id':   existing.pk,
+            'device_name': existing.name,
+            'detail_url':  f'/inventory/network/{existing.pk}/',
+        })
+
+    device = NetworkDevice.objects.create(
+        name          = name,
+        management_ip = ip,
+    )
+    return JsonResponse({
+        'created':     True,
+        'device_id':   device.pk,
+        'device_name': device.name,
+        'detail_url':  f'/inventory/network/{device.pk}/',
+    })
 
 
 # ---------------------------------------------------------------------------

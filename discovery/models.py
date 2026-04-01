@@ -50,10 +50,11 @@ class DeviceDiscoveryResult(models.Model):
         'inventory.NetworkDevice', on_delete=models.CASCADE, related_name='discovery_results'
     )
     status       = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
-    arp_output   = models.TextField(blank=True)
-    mac_output   = models.TextField(blank=True)
-    error        = models.TextField(blank=True)
-    collected_at = models.DateTimeField(null=True, blank=True)
+    arp_output    = models.TextField(blank=True)
+    mac_output    = models.TextField(blank=True)
+    extra_outputs = models.JSONField(default=dict, blank=True)   # {command: raw_output}
+    error         = models.TextField(blank=True)
+    collected_at  = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering     = ['device__name']

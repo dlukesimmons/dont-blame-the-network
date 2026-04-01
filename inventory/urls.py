@@ -16,6 +16,12 @@ urlpatterns = [
     # Bulk profile assignment
     path('network/bulk-assign/',     views.network_bulk_assign,     name='network_bulk_assign'),
 
+    # Bulk SNMP inventory update
+    path('network/snmp-update/',     views.network_snmp_update,     name='network_snmp_update'),
+
+    # Quick-add from scan results
+    path('network/quick-add/',       views.network_quick_add,       name='network_quick_add'),
+
     # Connectivity tests
     path('network/<int:device_pk>/test-snmp/<int:profile_pk>/', views.test_snmp, name='test_snmp'),
     path('network/<int:device_pk>/test-ssh/<int:profile_pk>/',  views.test_ssh,  name='test_ssh'),

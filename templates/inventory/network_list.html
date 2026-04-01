@@ -43,8 +43,9 @@
             <th>Name</th>
             <th>Type</th>
             <th>Primary IP</th>
+            <th>OS / Firmware</th>
+            <th>Serial #</th>
             <th>Status</th>
-            <th>Location</th>
             <th>Auth Profiles</th>
             <th></th>
           </tr>
@@ -52,6 +53,7 @@
         <tbody>
           {% for d in devices %}
           <tr class="device-row" data-id="{{ d.pk }}"
+              id="device-row-{{ d.pk }}"
               style="{% if d.status == 'decommissioned' %}opacity:0.4;{% elif d.status == 'inactive' %}opacity:0.65;{% endif %}">
             <td class="ps-3">
               <input type="checkbox" class="form-check-input device-cb" value="{{ d.pk }}"
@@ -59,12 +61,18 @@
             </td>
             <td>
               <a href="{% url 'network_detail' d.pk %}" style="font-weight:600;color:#f1f5f9;text-decoration:none;">{{ d.name }}</a>
-              {% if d.model %}<div style="font-size:0.72rem;color:#475569;">{{ d.manufacturer }} {{ d.model }}</div>{% endif %}
+              <div style="font-size:0.72rem;color:#475569;" id="device-hw-{{ d.pk }}">
+                {% if d.manufacturer or d.model %}{{ d.manufacturer }} {{ d.model }}{% endif %}
+                {% if d.snmp_sysname and d.snmp_sysname != d.name %}
+                  <span class="text-secondary ms-1">· {{ d.snmp_sysname }}</span>
+                {% endif %}
+              </div>
             </td>
-            <td style="font-size:0.82rem;color:#94a3b8;">{{ d.get_device_type_display|default:"—" }}</td>
+            <td style="font-size:0.82rem;color:#94a3b8;" id="device-type-{{ d.pk }}">{{ d.get_device_type_display|default:"—" }}</td>
             <td style="font-family:monospace;font-size:0.875rem;color:#93c5fd;">{{ d.primary_ip|default:"—" }}</td>
+            <td style="font-size:0.82rem;color:#94a3b8;" id="device-os-{{ d.pk }}">{{ d.os_version|default:d.firmware_version|default:"—" }}</td>
+            <td style="font-family:monospace;font-size:0.78rem;color:#64748b;" id="device-serial-{{ d.pk }}">{{ d.serial_number|default:"—" }}</td>
             <td>{% include 'inventory/_status_badge.html' with status=d.status %}</td>
-            <td style="font-size:0.82rem;color:#64748b;">{{ d.location|default:"—" }}</td>
             <td>
               {% for p in d.snmp_profiles.all %}<span class="badge me-1" style="background:#172554;color:#93c5fd;">SNMP: {{ p.name }}</span>{% endfor %}
               {% for p in d.ssh_profiles.all  %}<span class="badge me-1" style="background:#14532d;color:#86efac;">SSH: {{ p.name }}</span>{% endfor %}
@@ -93,7 +101,7 @@
 </div>
 
 <!-- ================================================================
-     BULK ASSIGN PANEL — fixed bottom bar, shown when rows selected
+     BULK PANEL — fixed bottom bar, shown when rows selected
      ================================================================ -->
 <div id="bulkPanel" style="
   display:none;position:fixed;bottom:0;left:0;right:0;z-index:1050;
@@ -157,11 +165,94 @@
       <button class="btn btn-outline-danger btn-sm" onclick="applyBulkAssign('remove')">
         <i class="bi bi-dash-lg me-1"></i> Remove Profiles
       </button>
+      <hr style="border-color:#334155;margin:0.1rem 0;">
+      <button class="btn btn-sm" style="background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af;" onclick="runBulkTest('snmp')">
+        <i class="bi bi-reception-4 me-1"></i> Test SNMP
+      </button>
+      <button class="btn btn-sm" style="background:#14532d;color:#86efac;border:1px solid #166534;" onclick="runBulkTest('ssh')">
+        <i class="bi bi-terminal me-1"></i> Test SSH
+      </button>
+      <button class="btn btn-sm" style="background:#1c2d4a;color:#7dd3fc;border:1px solid #1d4ed8;" onclick="runSnmpUpdate()">
+        <i class="bi bi-cloud-download me-1"></i> SNMP Update
+      </button>
+      <hr style="border-color:#334155;margin:0.1rem 0;">
       <button class="btn btn-outline-secondary btn-sm" onclick="clearSelection()">
         Cancel
       </button>
     </div>
 
+  </div>
+</div>
+
+<!-- ================================================================
+     BULK AUTH TEST RESULTS MODAL
+     ================================================================ -->
+<div class="modal fade" id="testModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+    <div class="modal-content" style="background:#1e293b;border:1px solid #293548;">
+      <div class="modal-header" style="border-color:#293548;">
+        <h5 class="modal-title" id="testResultsTitle" style="font-size:0.95rem;">
+          <i class="bi bi-activity me-2 text-primary"></i>Bulk Auth Test
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <table class="table table-hover mb-0" style="font-size:0.85rem;">
+          <thead style="position:sticky;top:0;background:#162032;z-index:1;">
+            <tr>
+              <th class="ps-4" style="width:25%;">Device</th>
+              <th style="width:15%;font-family:monospace;">IP</th>
+              <th style="width:20%;">Profile</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody id="testResultsBody"></tbody>
+        </table>
+      </div>
+      <div class="modal-footer" style="border-color:#293548;justify-content:space-between;">
+        <div id="testSummary" style="font-size:0.82rem;"></div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     SNMP UPDATE RESULTS MODAL
+     ================================================================ -->
+<div class="modal fade" id="snmpUpdateModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" style="max-width:960px;">
+    <div class="modal-content" style="background:#1e293b;border:1px solid #293548;">
+      <div class="modal-header" style="border-color:#293548;">
+        <h5 class="modal-title" style="font-size:0.95rem;">
+          <i class="bi bi-cloud-download me-2 text-info"></i>
+          <span id="snmpUpdateTitle">SNMP Inventory Update</span>
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0" style="overflow-x:auto;">
+        <table class="table table-hover mb-0" style="font-size:0.82rem;min-width:820px;">
+          <thead style="position:sticky;top:0;background:#162032;z-index:1;">
+            <tr>
+              <th class="ps-4" style="width:16%;">Device</th>
+              <th style="width:10%;font-family:monospace;">IP</th>
+              <th style="width:10%;">Profile</th>
+              <th style="width:12%;">sysName</th>
+              <th style="width:10%;">Manufacturer</th>
+              <th style="width:14%;">Model</th>
+              <th style="width:10%;font-family:monospace;">Serial #</th>
+              <th style="width:12%;">OS Version</th>
+              <th style="width:6%;">Result</th>
+            </tr>
+          </thead>
+          <tbody id="snmpUpdateBody"></tbody>
+        </table>
+      </div>
+      <div class="modal-footer" style="border-color:#293548;justify-content:space-between;">
+        <div id="snmpUpdateSummary" style="font-size:0.82rem;"></div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -244,8 +335,24 @@
 
 {% block extra_scripts %}
 <script>
-const CSRF             = '{{ csrf_token }}';
-const BULK_ASSIGN_URL  = '{% url "network_bulk_assign" %}';
+const CSRF            = '{{ csrf_token }}';
+const BULK_ASSIGN_URL = '{% url "network_bulk_assign" %}';
+
+// Per-device profile data embedded from server — used by bulk test
+const DEVICE_PROFILES = {
+{% for d in devices %}
+  "{{ d.pk }}": {
+    name: "{{ d.name|escapejs }}",
+    ip:   "{{ d.primary_ip|default:d.management_ip|default:''|escapejs }}",
+    snmp: [{% for p in d.snmp_profiles.all %}{id:"{{ p.pk }}",name:"{{ p.name|escapejs }}"}{% if not forloop.last %},{% endif %}{% endfor %}],
+    ssh:  [{% for p in d.ssh_profiles.all  %}{id:"{{ p.pk }}",name:"{{ p.name|escapejs }}"}{% if not forloop.last %},{% endif %}{% endfor %}],
+  },
+{% endfor %}
+};
+
+// All profiles in the system (for name lookup when testing non-assigned profiles)
+const ALL_SNMP = { {% for p in snmp_profiles %}"{{ p.pk }}":"{{ p.name|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %} };
+const ALL_SSH  = { {% for p in ssh_profiles  %}"{{ p.pk }}":"{{ p.name|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %} };
 
 // ── Selection ──────────────────────────────────────────────────────────────
 
@@ -259,15 +366,15 @@ function toggleSelectAll(master) {
 }
 
 function onCheckChange() {
-  const ids = getChecked();
-  const panel = document.getElementById('bulkPanel');
-  const count = document.getElementById('selectedCount');
+  const ids    = getChecked();
+  const panel  = document.getElementById('bulkPanel');
+  const count  = document.getElementById('selectedCount');
   const master = document.getElementById('selectAll');
 
   if (ids.length) {
     panel.style.display = '';
     count.textContent   = `${ids.length} device${ids.length !== 1 ? 's' : ''}`;
-    document.getElementById('mainCard').style.marginBottom = '130px';
+    document.getElementById('mainCard').style.marginBottom = '170px';
   } else {
     panel.style.display = 'none';
     document.getElementById('mainCard').style.marginBottom = '';
@@ -309,7 +416,6 @@ async function applyBulkAssign(action) {
 
   if (data.success) {
     const verb = action === 'remove' ? 'removed from' : 'added to';
-    // Quick visual feedback then reload to show updated badges
     document.getElementById('bulkPanel').innerHTML =
       `<div style="color:#86efac;font-size:0.9rem;padding:0.5rem;">
          <i class="bi bi-check-circle-fill me-2"></i>
@@ -319,6 +425,248 @@ async function applyBulkAssign(action) {
   } else {
     alert(data.error || 'Something went wrong.');
   }
+}
+
+// ── Bulk auth test ─────────────────────────────────────────────────────────
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function runBulkTest(type) {
+  const deviceIds    = getChecked();
+  const checkedIds   = [...document.querySelectorAll(`.bulk-${type}:checked`)].map(c => c.value);
+  const allProfiles  = type === 'snmp' ? ALL_SNMP : ALL_SSH;
+
+  // Build test matrix: one row per device × profile combo
+  const combos = [];
+  for (const did of deviceIds) {
+    const dev = DEVICE_PROFILES[did];
+    if (!dev) continue;
+
+    // If profiles checked in panel → test those; else → test all assigned
+    let profiles;
+    if (checkedIds.length) {
+      profiles = checkedIds.map(pid => ({id: pid, name: allProfiles[pid] || `Profile ${pid}`}));
+    } else {
+      profiles = dev[type];  // already-assigned profiles for this device
+    }
+
+    if (!profiles.length) {
+      // No profiles to test — show a placeholder row
+      combos.push({deviceId: did, deviceName: dev.name, deviceIp: dev.ip,
+                   profileId: null, profileName: null});
+    } else {
+      for (const p of profiles) {
+        combos.push({deviceId: did, deviceName: dev.name, deviceIp: dev.ip,
+                     profileId: p.id, profileName: p.name});
+      }
+    }
+  }
+
+  // Populate modal table
+  const label = type.toUpperCase();
+  const icon  = type === 'snmp' ? 'bi-reception-4' : 'bi-terminal';
+  document.getElementById('testResultsTitle').innerHTML =
+    `<i class="bi ${icon} me-2"></i>Bulk ${label} Test — ${deviceIds.length} device${deviceIds.length !== 1 ? 's' : ''}` +
+    (checkedIds.length ? `, ${checkedIds.length} profile${checkedIds.length !== 1 ? 's' : ''}` : ' (assigned profiles)');
+
+  const tbody = document.getElementById('testResultsBody');
+  tbody.innerHTML = '';
+
+  for (const c of combos) {
+    const rowId = `trow-${c.deviceId}-${c.profileId || 'none'}`;
+    let resultHtml;
+    if (!c.deviceIp) {
+      resultHtml = `<span style="color:#f87171;"><i class="bi bi-exclamation-circle me-1"></i>No IP configured</span>`;
+    } else if (!c.profileId) {
+      resultHtml = `<span style="color:#64748b;">No ${label} profiles assigned</span>`;
+    } else {
+      resultHtml = `<span style="color:#475569;">Queued…</span>`;
+    }
+    tbody.innerHTML += `
+      <tr id="${rowId}">
+        <td class="ps-4" style="font-weight:600;color:#f1f5f9;">${escHtml(c.deviceName)}</td>
+        <td style="font-family:monospace;color:#93c5fd;">${escHtml(c.deviceIp || '—')}</td>
+        <td style="color:#94a3b8;">${escHtml(c.profileName || '—')}</td>
+        <td id="${rowId}-result">${resultHtml}</td>
+      </tr>`;
+  }
+
+  document.getElementById('testSummary').innerHTML = '';
+  new bootstrap.Modal(document.getElementById('testModal')).show();
+
+  // Only test rows that have both an IP and a profile
+  const testable = combos.filter(c => c.profileId && c.deviceIp);
+  if (!testable.length) return;
+
+  // Mark all testable rows as "Testing…"
+  for (const c of testable) {
+    document.getElementById(`trow-${c.deviceId}-${c.profileId}-result`).innerHTML =
+      `<span style="color:#60a5fa;"><span class="spinner-border spinner-border-sm me-1" style="width:.75rem;height:.75rem;"></span>Testing…</span>`;
+  }
+
+  let passed = 0, failed = 0;
+  const total = testable.length;
+
+  function updateSummary() {
+    const done = passed + failed;
+    document.getElementById('testSummary').innerHTML =
+      `<span style="color:#86efac;">${passed} passed</span> · ` +
+      `<span style="color:#f87171;">${failed} failed</span>` +
+      (done < total ? ` · <span style="color:#64748b;">${total - done} pending</span>` : '');
+  }
+
+  updateSummary();
+
+  // Fire all requests simultaneously — gunicorn queues extras
+  await Promise.all(testable.map(async c => {
+    const resultEl = document.getElementById(`trow-${c.deviceId}-${c.profileId}-result`);
+    try {
+      const res  = await fetch(`/inventory/network/${c.deviceId}/test-${type}/${c.profileId}/`, {
+        method: 'POST', headers: {'X-CSRFToken': CSRF},
+      });
+      const data = await res.json();
+      if (data.success) {
+        passed++;
+        let detail = '';
+        if (type === 'snmp' && data.sys_name)
+          detail = `<span style="color:#64748b;font-size:0.75rem;margin-left:0.4rem;">${escHtml(data.sys_name)}</span>`;
+        if (type === 'ssh' && data.banner)
+          detail = `<span style="color:#64748b;font-size:0.75rem;margin-left:0.4rem;">${escHtml(data.banner)}</span>`;
+        resultEl.innerHTML =
+          `<span style="color:#86efac;"><i class="bi bi-check-circle-fill me-1"></i>Success</span>${detail}`;
+      } else {
+        failed++;
+        resultEl.innerHTML =
+          `<span style="color:#f87171;"><i class="bi bi-x-circle-fill me-1"></i>${escHtml(data.error || 'Failed')}</span>`;
+      }
+    } catch {
+      failed++;
+      resultEl.innerHTML =
+        `<span style="color:#f87171;"><i class="bi bi-x-circle-fill me-1"></i>Request error</span>`;
+    }
+    updateSummary();
+  }));
+}
+
+// ── Bulk SNMP Update ───────────────────────────────────────────────────────
+
+const SNMP_UPDATE_URL = '{% url "network_snmp_update" %}';
+
+async function runSnmpUpdate() {
+  const deviceIds = getChecked();
+  if (!deviceIds.length) return;
+
+  document.getElementById('snmpUpdateTitle').textContent =
+    `SNMP Inventory Update — ${deviceIds.length} device${deviceIds.length !== 1 ? 's' : ''}`;
+
+  const tbody = document.getElementById('snmpUpdateBody');
+  tbody.innerHTML = '';
+
+  // Pre-populate rows
+  for (const did of deviceIds) {
+    const dev = DEVICE_PROFILES[did];
+    if (!dev) continue;
+    const noProfiles = !dev.snmp.length;
+    tbody.innerHTML += `
+      <tr id="supdate-row-${did}">
+        <td class="ps-4" style="font-weight:600;color:#f1f5f9;">${escHtml(dev.name)}</td>
+        <td style="font-family:monospace;color:#93c5fd;">${escHtml(dev.ip || '—')}</td>
+        <td id="supdate-profile-${did}" style="color:#64748b;">${noProfiles ? '<span style="color:#f87171;">None assigned</span>' : '<span style="color:#475569;">…</span>'}</td>
+        <td id="supdate-sysname-${did}"  style="color:#94a3b8;">—</td>
+        <td id="supdate-mfg-${did}"      style="color:#94a3b8;">—</td>
+        <td id="supdate-model-${did}"    style="color:#94a3b8;">—</td>
+        <td id="supdate-serial-${did}"   style="font-family:monospace;color:#64748b;">—</td>
+        <td id="supdate-os-${did}"       style="color:#94a3b8;">—</td>
+        <td id="supdate-result-${did}">
+          ${noProfiles || !dev.ip
+            ? `<span style="color:#f87171;font-size:0.75rem;">${!dev.ip ? 'No IP' : 'No SNMP'}</span>`
+            : `<span style="color:#475569;">Queued…</span>`}
+        </td>
+      </tr>`;
+  }
+
+  document.getElementById('snmpUpdateSummary').innerHTML = '';
+  new bootstrap.Modal(document.getElementById('snmpUpdateModal')).show();
+
+  const testable = deviceIds.filter(did => {
+    const d = DEVICE_PROFILES[did];
+    return d && d.ip && d.snmp.length;
+  });
+
+  if (!testable.length) return;
+
+  // Mark as polling
+  for (const did of testable) {
+    document.getElementById(`supdate-result-${did}`).innerHTML =
+      `<span style="color:#60a5fa;"><span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem;"></span></span>`;
+  }
+
+  let updated = 0, failed = 0;
+
+  function updateSummary() {
+    const done = updated + failed;
+    document.getElementById('snmpUpdateSummary').innerHTML =
+      `<span style="color:#86efac;">${updated} updated</span> · ` +
+      `<span style="color:#f87171;">${failed} failed</span>` +
+      (done < testable.length ? ` · <span style="color:#64748b;">${testable.length - done} pending</span>` : '');
+  }
+  updateSummary();
+
+  await Promise.all(testable.map(async did => {
+    try {
+      const res  = await fetch(SNMP_UPDATE_URL, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+        body: JSON.stringify({device_id: did}),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        updated++;
+        const f = data.fields_updated || {};
+        document.getElementById(`supdate-profile-${did}`).textContent  = data.profile || '—';
+        document.getElementById(`supdate-sysname-${did}`).textContent  = data.snmp_sysname  || '—';
+        document.getElementById(`supdate-mfg-${did}`).textContent      = data.manufacturer  || '—';
+        document.getElementById(`supdate-model-${did}`).textContent    = data.model         || '—';
+        document.getElementById(`supdate-serial-${did}`).textContent   = data.serial_number || '—';
+        document.getElementById(`supdate-os-${did}`).textContent       = data.os_version    || '—';
+        document.getElementById(`supdate-result-${did}`).innerHTML =
+          `<span style="color:#86efac;font-size:0.75rem;"><i class="bi bi-check-circle-fill"></i></span>`;
+
+        // Live-update the table row so user sees changes immediately
+        const hwEl = document.getElementById(`device-hw-${did}`);
+        const osEl = document.getElementById(`device-os-${did}`);
+        const snEl = document.getElementById(`device-serial-${did}`);
+        const dtEl = document.getElementById(`device-type-${did}`);
+        if (hwEl && (data.manufacturer || data.model)) {
+          const mn = data.manufacturer || '';
+          const md = data.model || '';
+          const sn = data.snmp_sysname && data.snmp_sysname !== DEVICE_PROFILES[did].name
+                     ? `<span class="text-secondary ms-1">· ${escHtml(data.snmp_sysname)}</span>` : '';
+          hwEl.innerHTML = escHtml(`${mn} ${md}`.trim()) + sn;
+        }
+        if (osEl && data.os_version) osEl.textContent = data.os_version;
+        if (snEl && data.serial_number) snEl.textContent = data.serial_number;
+        if (dtEl && data.device_type) dtEl.textContent = data.device_type.replace('_', ' ');
+      } else {
+        failed++;
+        document.getElementById(`supdate-profile-${did}`).textContent = '—';
+        document.getElementById(`supdate-result-${did}`).innerHTML =
+          `<span style="color:#f87171;font-size:0.75rem;" title="${escHtml(data.error || 'Failed')}">
+             <i class="bi bi-x-circle-fill"></i>
+           </span>`;
+      }
+    } catch {
+      failed++;
+      document.getElementById(`supdate-result-${did}`).innerHTML =
+        `<span style="color:#f87171;font-size:0.75rem;"><i class="bi bi-x-circle-fill"></i></span>`;
+    }
+    updateSummary();
+  }));
 }
 
 // ── Import modal ───────────────────────────────────────────────────────────
@@ -334,12 +682,5 @@ function confirmDelete(url, name) {
   document.getElementById('deleteName').textContent = name;
   new bootstrap.Modal(document.getElementById('deleteModal')).show();
 }
-
-// Open import modal automatically if server redirected back after an error
-{% if messages %}
-{% for msg in messages %}{% if 'Import' in msg.message or 'import' in msg.message %}
-// openImport();  // optionally re-open on error
-{% endif %}{% endfor %}
-{% endif %}
 </script>
 {% endblock %}

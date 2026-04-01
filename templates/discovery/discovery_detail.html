@@ -11,7 +11,31 @@ pre.raw-output {
     font-size:.75rem; color:#94a3b8; padding:.75rem; max-height:300px;
     overflow-y:auto; white-space:pre; margin:0;
 }
+.extra-tab-btn { transition: background .1s, color .1s, border-color .1s; }
+.extra-tab-btn:hover { background:#1e3a5f !important; color:#93c5fd !important; border-color:#1e40af !important; }
 </style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function showExtraTab(btn, paneId) {
+    // Find the parent extra-tabs container and reset all buttons
+    const tabGroup = btn.closest('[id^="extra-tabs-"]');
+    tabGroup.querySelectorAll('.extra-tab-btn').forEach(b => {
+        b.style.background   = '#162032';
+        b.style.color        = '#64748b';
+        b.style.borderColor  = '#293548';
+    });
+    btn.style.background  = '#1e3a5f';
+    btn.style.color       = '#93c5fd';
+    btn.style.borderColor = '#1e40af';
+
+    // Hide all panes in the same accordion body, show the target
+    const body = tabGroup.closest('.accordion-body');
+    body.querySelectorAll('.extra-tab-pane').forEach(p => p.style.display = 'none');
+    document.getElementById(paneId).style.display = '';
+}
+</script>
 {% endblock %}
 
 {% block topbar_actions %}
@@ -191,13 +215,11 @@ pre.raw-output {
                     {% endif %}
                 </div>
 
-            <div>
-
-            <!-- Raw output toggle -->
-            <div class="px-3 pb-3 pt-1">
+            <!-- Raw ARP / MAC toggle -->
+            <div class="px-3 pb-2 pt-1" style="border-bottom:1px solid #293548;">
                 <details>
                     <summary class="small text-secondary" style="cursor:pointer;">
-                        <i class="bi bi-terminal me-1"></i>Show raw SSH output
+                        <i class="bi bi-terminal me-1"></i>Show raw ARP / MAC output
                     </summary>
                     <div class="row g-2 mt-1">
                         <div class="col-lg-6">
@@ -211,6 +233,37 @@ pre.raw-output {
                     </div>
                 </details>
             </div>
+
+            <!-- Extra command outputs -->
+            {% if r.extra_outputs %}
+            <div class="px-3 pt-3 pb-3">
+                <div class="small fw-semibold text-secondary mb-2">
+                    <i class="bi bi-collection me-1"></i>Additional Commands
+                    <span class="badge bg-secondary ms-1" style="font-size:.65rem;">{{ r.extra_outputs|length }}</span>
+                </div>
+                <div class="d-flex flex-wrap gap-2 mb-2" id="extra-tabs-{{ r.pk }}">
+                    {% for cmd, output in r.extra_outputs.items %}
+                    <button type="button"
+                            class="btn btn-sm extra-tab-btn {% if forloop.first %}active{% endif %}"
+                            style="font-size:.72rem;font-family:monospace;
+                                   background:{% if forloop.first %}#1e3a5f{% else %}#162032{% endif %};
+                                   color:{% if forloop.first %}#93c5fd{% else %}#64748b{% endif %};
+                                   border:1px solid {% if forloop.first %}#1e40af{% else %}#293548{% endif %};"
+                            onclick="showExtraTab(this, 'extra-{{ r.pk }}-{{ forloop.counter }}')">
+                        {{ cmd }}
+                    </button>
+                    {% endfor %}
+                </div>
+                {% for cmd, output in r.extra_outputs.items %}
+                <div id="extra-{{ r.pk }}-{{ forloop.counter }}"
+                     class="extra-tab-pane"
+                     style="{% if not forloop.first %}display:none;{% endif %}">
+                    <pre class="raw-output" style="max-height:500px;">{{ output|default:"(no output)" }}</pre>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
         </div>
     </div>
     {% endif %}
